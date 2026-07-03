@@ -1,12 +1,7 @@
-const fs = require('fs/promises');
-const path = require('path');
 const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3');
+const { createLogger } = require('../utils/logger');
 
-const uploadRoot = path.join(__dirname, '..', '..', 'uploads');
-
-function isS3Enabled() {
-  return process.env.STORAGE_DRIVER === 's3' && process.env.S3_BUCKET && process.env.S3_REGION;
-}
+const log = createLogger('storage');
 
 function s3Client() {
   return new S3Client({
@@ -27,35 +22,39 @@ function safeName(name) {
   return name.replace(/[^a-zA-Z0-9.-]/g, '_');
 }
 
+function validateS3Config() {
+  if (!process.env.S3_BUCKET || !process.env.S3_REGION) {
+    throw new Error(
+      'S3 is not configured. Set S3_BUCKET and S3_REGION in your .env file. ' +
+      'An AWS account (or S3-compatible service like MinIO/Cloudflare R2) is required for file uploads.'
+    );
+  }
+}
+
 exports.uploadDocument = async function uploadDocument(file, folder = 'documents') {
+  validateS3Config();
+
   const key = `${folder}/${Date.now()}-${safeName(file.originalname)}`;
 
-  if (isS3Enabled()) {
-    await s3Client().send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype
-      })
-    );
+  await s3Client().send(
+    new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype
+    })
+  );
 
-    const baseUrl = (process.env.S3_PUBLIC_BASE_URL || `https://${process.env.S3_BUCKET}.s3.${process.env.S3_REGION}.amazonaws.com`).replace(/\/$/, '');
-    return {
-      fileUrl: `${baseUrl}/${encodeURIComponent(key)}`,
-      storageProvider: 's3',
-      storageKey: key,
-      mimeType: file.mimetype,
-      size: file.size
-    };
-  }
+  const baseUrl = (
+    process.env.S3_PUBLIC_BASE_URL ||
+    `https://${process.env.S3_BUCKET}.s3.${process.env.S3_REGION}.amazonaws.com`
+  ).replace(/\/$/, '');
 
-  await fs.mkdir(path.join(uploadRoot, folder), { recursive: true });
-  const diskPath = path.join(uploadRoot, key);
-  await fs.writeFile(diskPath, file.buffer);
+  log.info('File uploaded to S3', { key, bucket: process.env.S3_BUCKET, size: file.size });
+
   return {
-    fileUrl: `/uploads/${key}`,
-    storageProvider: 'local',
+    fileUrl: `${baseUrl}/${encodeURIComponent(key)}`,
+    storageProvider: 's3',
     storageKey: key,
     mimeType: file.mimetype,
     size: file.size

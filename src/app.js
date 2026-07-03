@@ -5,12 +5,12 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-const path = require('path');
 
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
 const { createLogger } = require('./utils/logger');
+const { register, metricsMiddleware } = require('./utils/metrics');
 const {
   DEFAULTS,
   HTTP_STATUS,
@@ -36,6 +36,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: DEFAULTS.BODY_SIZE_LIMIT }));
 app.use(express.urlencoded({ extended: true }));
+app.use(metricsMiddleware);
 app.use(requestLogger);
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
   stream: { write: (message) => log.info(message.trim(), { source: 'morgan' }) }
@@ -54,13 +55,18 @@ app.use('/api', rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many requests. Please slow down.' }
 }));
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.get('/health', (_req, res) => res.json({
   ok: true,
   service: SERVICE_NAME,
   timestamp: new Date().toISOString()
 }));
+
+app.get('/metrics', async (_req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
+
 app.use('/api', routes);
 app.use((_req, res) => res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Route not found' }));
 app.use(errorHandler);

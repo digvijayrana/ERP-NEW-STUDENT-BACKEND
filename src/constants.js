@@ -48,14 +48,16 @@ module.exports = {
   },
 
   LOGGER: {
-    MAX_FILE_SIZE: 5 * 1024 * 1024,
-    MAX_FILES: 5,
-    TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss'
+    TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss',
+    SPLUNK_BATCH_SIZE: 10,
+    SPLUNK_FLUSH_INTERVAL_MS: 5000,
+    SPLUNK_EPOCH_DIVISOR: 1000
   },
 
   UPLOAD: {
     MAX_FILE_SIZE: 5 * 1024 * 1024,
-    MAX_OTHER_DOCUMENTS: 10
+    MAX_OTHER_DOCUMENTS: 10,
+    ALLOWED_MIME_TYPES: ['image/jpeg', 'image/png', 'application/pdf']
   },
 
   EXAM: {
@@ -77,6 +79,15 @@ module.exports = {
     MAX_EXAM_RESULTS: 10,
     MAX_FEE_INVOICES: 8,
     DASHBOARD_RECENT_SUBMISSIONS: 5
+  },
+
+  METRICS: {
+    PREFIX: 'erp_',
+    HISTOGRAM_BUCKETS: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    PERCENTILE_50: 0.5,
+    PERCENTILE_90: 0.9,
+    PERCENTILE_99: 0.99,
+    PERCENTILE_TOLERANCE: 0.01
   },
 
   FALLBACK_PORT_RETRIES: 5,

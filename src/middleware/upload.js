@@ -1,11 +1,11 @@
 const multer = require('multer');
+const { UPLOAD } = require('../constants');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: UPLOAD.MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'application/pdf'];
-    cb(null, allowed.includes(file.mimetype));
+    cb(null, UPLOAD.ALLOWED_MIME_TYPES.includes(file.mimetype));
   }
 });
 
