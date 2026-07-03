@@ -9,8 +9,17 @@ const DIFFICULTY_HINTS = {
   hard: 'analysis, multi-step reasoning, and higher-order thinking'
 };
 
-function buildPrompt({ subject, chapter, bookReference, difficulty, questionCount, additionalContext }) {
+const PDF_CONTENT_LIMIT = 8000;
+
+function buildPrompt({ subject, chapter, bookReference, difficulty, questionCount, additionalContext, pdfContent }) {
   const levelHint = DIFFICULTY_HINTS[difficulty] || DIFFICULTY_HINTS.medium;
+
+  let pdfSection = '';
+  if (pdfContent) {
+    const truncated = pdfContent.slice(0, PDF_CONTENT_LIMIT);
+    pdfSection = `\nThe following is the content from the chapter PDF. Base your questions ONLY on this content:\n---\n${truncated}\n---\n`;
+  }
+
   return `You are an expert school teacher creating a unit test.
 
 Subject: ${subject}
@@ -19,6 +28,15 @@ Book: ${bookReference || 'standard school textbook'}
 Difficulty: ${difficulty} (${levelHint})
 Number of questions: ${questionCount}
 ${additionalContext ? `Additional context: ${additionalContext}` : ''}
+${pdfSection}
+IMPORTANT RULES:
+- Each question must be unique and test a different concept or skill.
+- Do not repeat similar question patterns or test the same knowledge point twice.
+- Vary question types: include MCQs, true/false, and short answer questions.
+- All questions must be directly related to the specified chapter and book.
+- Questions should test concepts that would be covered in this chapter of this textbook.
+- Do not include questions from other chapters or unrelated topics.
+- Frame questions using terminology and examples from the specified book.
 
 Return ONLY valid JSON array (no markdown) with this shape:
 [
@@ -41,52 +59,84 @@ Mix question types appropriately for the difficulty level.`;
 function fallbackQuestions({ subject, chapter, difficulty, questionCount, bookReference }) {
   const count = Math.min(Math.max(questionCount, EXAM.MIN_QUESTIONS), EXAM.MAX_QUESTIONS);
   const questions = [];
-  const types = difficulty === 'easy' ? ['mcq', 'true_false'] : ['mcq', 'short_answer'];
+  const allTypes = ['mcq', 'true_false', 'short_answer'];
+  const bookLabel = bookReference || 'the textbook';
 
-  for (let i = 1; i <= count; i += 1) {
-    const type = types[i % types.length];
+  const tfTemplates = [
+    { text: `True or False: "${chapter}" is a chapter covered in ${subject} (${bookLabel}).`, answer: 'True', explanation: `Checks awareness of the ${chapter} syllabus.` },
+    { text: `True or False: The concepts in "${chapter}" are unrelated to ${subject}.`, answer: 'False', explanation: `${chapter} is directly part of the ${subject} curriculum.` },
+    { text: `True or False: A student studying ${subject} should understand the key ideas from "${chapter}".`, answer: 'True', explanation: `${chapter} is a core topic in ${subject}.` }
+  ];
+
+  const saTemplates = [
+    { text: `Explain a key concept from "${chapter}" in ${subject} in 2-3 sentences.`, explanation: 'Open-ended; teacher may review manually.' },
+    { text: `What is the main learning objective of "${chapter}" in ${subject}?`, explanation: 'Tests understanding of the chapter purpose.' },
+    { text: `Describe how the ideas in "${chapter}" connect to real-world applications in ${subject}.`, explanation: 'Assesses practical understanding.' },
+    { text: `Summarize the most important terminology introduced in "${chapter}" (${subject}).`, explanation: 'Tests vocabulary recall for the chapter.' }
+  ];
+
+  const mcqTemplates = [
+    { text: `Which of the following best describes a core concept from "${chapter}" in ${subject}?`, correct: `A key idea from ${chapter}` },
+    { text: `What is the primary focus of "${chapter}" in ${subject} (${bookLabel})?`, correct: `The main topic covered in ${chapter}` },
+    { text: `Which statement about "${chapter}" in ${subject} is correct?`, correct: `An accurate fact from ${chapter}` },
+    { text: `A student studying "${chapter}" in ${subject} should be able to:`, correct: `Demonstrate understanding of ${chapter} concepts` },
+    { text: `Which example best illustrates a principle from "${chapter}" in ${subject}?`, correct: `A relevant example from ${chapter}` }
+  ];
+
+  let tfIdx = 0;
+  let saIdx = 0;
+  let mcqIdx = 0;
+
+  for (let i = 0; i < count; i += 1) {
+    const type = allTypes[i % allTypes.length];
     const qDifficulty = difficulty === 'mixed'
       ? ['easy', 'medium', 'hard'][i % 3]
       : difficulty;
 
     if (type === 'true_false') {
+      const tpl = tfTemplates[tfIdx % tfTemplates.length];
+      tfIdx += 1;
       questions.push({
-        text: `True or False: "${chapter}" is a chapter covered in ${subject}${bookReference ? ` (${bookReference})` : ''}.`,
+        text: tpl.text,
         type: 'true_false',
         options: ['True', 'False'],
-        correctAnswer: 'True',
+        correctAnswer: tpl.answer,
         marks: 1,
         difficulty: qDifficulty,
         chapter,
-        explanation: `This question checks awareness of the ${chapter} syllabus in ${subject}.`
+        explanation: tpl.explanation
       });
     } else if (type === 'short_answer') {
+      const tpl = saTemplates[saIdx % saTemplates.length];
+      saIdx += 1;
       questions.push({
-        text: `Explain a key concept from "${chapter}" in ${subject} in 2-3 sentences.`,
+        text: tpl.text,
         type: 'short_answer',
         options: [],
         correctAnswer: `A valid explanation of a core idea from ${chapter} in ${subject}.`,
         marks: 2,
         difficulty: qDifficulty,
         chapter,
-        explanation: 'Open-ended; teacher may review manually if needed.'
+        explanation: tpl.explanation
       });
     } else {
+      const tpl = mcqTemplates[mcqIdx % mcqTemplates.length];
+      mcqIdx += 1;
       const options = [
-        `Core idea ${i} from ${chapter}`,
-        `Unrelated concept from another subject`,
-        `Incorrect definition of ${chapter}`,
-        `Opposite of the correct answer`
+        tpl.correct,
+        `A concept from a different chapter`,
+        `An unrelated idea outside ${subject}`,
+        `A common misconception about ${chapter}`
       ];
       questions.push({
-        text: `Which option best describes topic ${i} from chapter "${chapter}" in ${subject}?`,
+        text: tpl.text,
         type: 'mcq',
         options,
         correctAnswer: options[0],
         marks: 1,
         difficulty: qDifficulty,
         chapter,
-        explanation: `Option 1 reflects the intended learning outcome for ${chapter}.`
+        explanation: `The correct option reflects the intended learning outcome for ${chapter}.`
       });
     }
   }
@@ -148,7 +198,8 @@ async function generateExamQuestions(params) {
     subject: params.subject,
     chapter: params.chapter,
     difficulty: params.difficulty,
-    count: params.questionCount
+    count: params.questionCount,
+    hasPdfContent: Boolean(params.pdfContent)
   });
 
   try {

@@ -59,7 +59,7 @@ function pipePdf(res, filename, build) {
 
 function rupees(value) {
   const n = Number(value || 0);
-  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtDate(date) {
@@ -114,26 +114,28 @@ function headerBlock(doc) {
 
   if (s.affiliation) {
     doc.fontSize(7.5).fillColor(C.MUTED).font('Helvetica-Oblique')
-      .text(s.affiliation, LEFT, topY + 94, { width: W, align: 'right' });
+      .text(s.affiliation, LEFT, topY + 90, { width: W, align: 'right' });
     doc.font('Helvetica');
+    doc.y = topY + 100;
+  } else {
+    doc.y = topY + 92;
   }
 
-  doc.y = topY + 108;
   doc.fillColor(C.TEXT);
 }
 
 function docTitle(doc, title, subtitle) {
   const y = doc.y;
-  doc.rect(LEFT, y, W, 32).fill(C.ICE);
-  doc.rect(LEFT, y, 4, 32).fill(C.BLUE);
-  doc.fontSize(14).fillColor(C.NAVY).font('Helvetica-Bold')
-    .text(title.toUpperCase(), LEFT + 16, y + 5, { width: W - 140 });
+  doc.rect(LEFT, y, W, 30).fill(C.ICE);
+  doc.rect(LEFT, y, 4, 30).fill(C.BLUE);
+  doc.fontSize(13).fillColor(C.NAVY).font('Helvetica-Bold')
+    .text(title.toUpperCase(), LEFT + 14, y + 4, { width: W - 140 });
   if (subtitle) {
     doc.fontSize(8).fillColor(C.MUTED).font('Helvetica')
-      .text(subtitle, LEFT + 16, y + 21, { width: W - 140 });
+      .text(subtitle, LEFT + 14, y + 19, { width: W - 140 });
   }
   doc.font('Helvetica').fillColor(C.TEXT);
-  doc.y = y + 40;
+  doc.y = y + 34;
 }
 
 function infoBox(doc, label, value, x, y, w) {
@@ -228,7 +230,6 @@ exports.feeInvoicePdf = function feeInvoicePdf(res, invoice) {
     if (invoice.status === 'paid') watermark(doc, 'Paid');
 
     docTitle(doc, 'Fee Invoice', `Invoice No: ${invoice.invoiceNumber}  |  Date: ${fmtDate(new Date())}`);
-    doc.moveDown(0.3);
 
     const bx = doc.y;
     const bw = (W - 12) / 3;
@@ -315,7 +316,7 @@ exports.payrollPdf = function payrollPdf(res, payroll) {
     if (payroll.status === 'paid') watermark(doc, 'Paid');
 
     docTitle(doc, 'Salary Slip', `Pay Period: ${period}  |  Generated: ${fmtDate(new Date())}`);
-    doc.moveDown(0.3);
+
 
     const bx = doc.y;
     const bw = (W - 12) / 3;

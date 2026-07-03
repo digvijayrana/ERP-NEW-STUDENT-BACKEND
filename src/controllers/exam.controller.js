@@ -1,3 +1,4 @@
+const pdfParse = require('pdf-parse');
 const Exam = require('../models/Exam');
 const ExamSubmission = require('../models/ExamSubmission');
 const ClassRoom = require('../models/ClassRoom');
@@ -137,6 +138,98 @@ exports.generate = asyncHandler(async (req, res) => {
   });
 
   log.info('Exam draft created with AI questions', {
+    examId: exam._id,
+    questionCount: questions.length,
+    provider,
+    aiGenerated
+  });
+
+  res.status(HTTP_STATUS.CREATED).json(exam);
+});
+
+const MAX_PDF_SIZE = 10 * 1024 * 1024;
+
+exports.generateFromPdf = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'No PDF file uploaded. Attach a file with field name "chapterPdf".' });
+  }
+
+  if (req.file.mimetype !== 'application/pdf') {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Invalid file type. Only PDF files are accepted.' });
+  }
+
+  if (req.file.size > MAX_PDF_SIZE) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'File too large. Maximum allowed size is 10 MB.' });
+  }
+
+  const {
+    title,
+    subject,
+    chapter,
+    bookReference,
+    additionalContext,
+    classRoom,
+    academicYear,
+    difficulty = 'medium',
+    questionCount = EXAM.DEFAULT_QUESTION_COUNT,
+    durationMinutes = EXAM.DEFAULT_DURATION_MINUTES
+  } = req.body;
+
+  if (!title || !subject || !chapter || !classRoom || !academicYear) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'title, subject, chapter, classRoom, and academicYear are required' });
+  }
+
+  const allowedClassIds = await teacherClassIds(req);
+  if (allowedClassIds && !allowedClassIds.map(String).includes(String(classRoom))) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teacher can create exams only for assigned classes' });
+  }
+
+  let pdfContent;
+  try {
+    const parsed = await pdfParse(req.file.buffer);
+    pdfContent = parsed.text;
+  } catch (err) {
+    log.error('PDF parsing failed', { error: err.message });
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Could not extract text from the uploaded PDF.' });
+  }
+
+  log.info('Generating exam questions from PDF', {
+    teacher: req.user.email,
+    subject,
+    chapter,
+    difficulty,
+    questionCount,
+    pdfTextLength: pdfContent.length
+  });
+
+  const { questions, aiGenerated, provider } = await generateExamQuestions({
+    subject,
+    chapter,
+    bookReference,
+    additionalContext,
+    difficulty,
+    questionCount: Number(questionCount),
+    pdfContent
+  });
+
+  const exam = await Exam.create({
+    title,
+    subject,
+    chapter,
+    bookReference,
+    additionalContext,
+    classRoom,
+    academicYear,
+    createdBy: req.user.role === ROLES.TEACHER ? req.user.teacher : undefined,
+    difficulty,
+    questionCount: questions.length,
+    durationMinutes,
+    questions,
+    aiGenerated,
+    status: 'draft'
+  });
+
+  log.info('Exam draft created from PDF', {
     examId: exam._id,
     questionCount: questions.length,
     provider,
