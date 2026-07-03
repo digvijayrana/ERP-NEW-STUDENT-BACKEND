@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { DEFAULTS } = require('../constants');
 
 exports.signToken = function signToken(user) {
   return jwt.sign(
@@ -8,7 +9,7 @@ exports.signToken = function signToken(user) {
       teacher: user.teacher?.toString(),
       student: user.student?.toString()
     },
-    process.env.JWT_SECRET || 'change-this-secret',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+    process.env.JWT_SECRET || DEFAULTS.JWT_SECRET_FALLBACK,
+    { expiresIn: process.env.JWT_EXPIRES_IN || DEFAULTS.JWT_EXPIRES_IN }
   );
 };

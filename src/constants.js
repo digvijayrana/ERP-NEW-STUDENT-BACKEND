@@ -1,0 +1,85 @@
+module.exports = {
+  DEFAULTS: {
+    PORT: 5000,
+    HOST: '0.0.0.0',
+    JWT_SECRET_FALLBACK: 'change-this-secret',
+    JWT_EXPIRES_IN: '8h',
+    MONGODB_URI: 'mongodb://127.0.0.1:27017/student_erp',
+    CLIENT_URL: 'http://localhost:4200',
+    DEV_CLIENT_URL: 'http://localhost:3000',
+    NODE_ENV: 'development',
+    RATE_LIMIT_MAX: 300,
+    BODY_SIZE_LIMIT: '10mb',
+    LOG_LEVEL_DEV: 'debug',
+    LOG_LEVEL_PROD: 'info',
+    OPENAI_MODEL: 'gpt-4o-mini'
+  },
+
+  HTTP_STATUS: {
+    OK: 200,
+    CREATED: 201,
+    BAD_REQUEST: 400,
+    UNAUTHORIZED: 401,
+    FORBIDDEN: 403,
+    NOT_FOUND: 404,
+    INTERNAL_SERVER_ERROR: 500
+  },
+
+  RATE_LIMIT: {
+    LOGIN_WINDOW_MS: 15 * 60 * 1000,
+    LOGIN_MAX_REQUESTS: 30,
+    API_WINDOW_MS: 60 * 1000
+  },
+
+  ROLES: {
+    ADMIN: 'admin',
+    TEACHER: 'teacher',
+    STUDENT: 'student',
+    PARENT: 'parent'
+  },
+
+  PASSWORD: {
+    BCRYPT_ROUNDS: 12
+  },
+
+  DB: {
+    SERVER_SELECTION_TIMEOUT_MS: 5000,
+    MONGOOSE_DUPLICATE_KEY_CODE: 11000
+  },
+
+  LOGGER: {
+    MAX_FILE_SIZE: 5 * 1024 * 1024,
+    MAX_FILES: 5,
+    TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss'
+  },
+
+  UPLOAD: {
+    MAX_FILE_SIZE: 5 * 1024 * 1024,
+    MAX_OTHER_DOCUMENTS: 10
+  },
+
+  EXAM: {
+    MIN_QUESTIONS: 3,
+    MAX_QUESTIONS: 20,
+    DEFAULT_QUESTION_COUNT: 10,
+    DEFAULT_DURATION_MINUTES: 60,
+    MIN_DURATION_MINUTES: 5,
+    PASS_PERCENTAGE: 40,
+    AI_TEMPERATURE: 0.4,
+    ANALYSIS_TEMPERATURE: 0.3
+  },
+
+  PAGINATION: {
+    DEFAULT_PAGE_SIZE: 8,
+    MAX_RECENT_ATTENDANCE: 90,
+    MAX_RECENT_ITEMS: 30,
+    MAX_TREND_ITEMS: 6,
+    MAX_EXAM_RESULTS: 10,
+    MAX_FEE_INVOICES: 8,
+    DASHBOARD_RECENT_SUBMISSIONS: 5
+  },
+
+  FALLBACK_PORT_RETRIES: 5,
+
+  SERVICE_NAME: 'student-erp-api'
+};

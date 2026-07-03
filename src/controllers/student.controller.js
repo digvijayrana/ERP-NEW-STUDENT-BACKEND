@@ -4,6 +4,7 @@ const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { uploadDocument } = require('../services/documentStorage.service');
 const { nextAdmissionNumber } = require('../services/sequence.service');
+const { HTTP_STATUS, ROLES } = require('../constants');
 
 async function fileToDocument(file, type, title, folder) {
   const stored = await uploadDocument(file, folder);
@@ -19,7 +20,7 @@ exports.createAdmission = asyncHandler(async (req, res) => {
   try {
     payload = JSON.parse(req.body.data || '{}');
   } catch {
-    return res.status(400).json({ message: 'Invalid admission payload' });
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Invalid admission payload' });
   }
 
   const files = req.files || {};
@@ -61,16 +62,16 @@ exports.createAdmission = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  res.status(201).json(createdStudent);
+  res.status(HTTP_STATUS.CREATED).json(createdStudent);
 });
 
 exports.list = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.classRoom) filter['enrollments.classRoom'] = req.query.classRoom;
   if (req.query.status) filter.status = req.query.status;
-  if (req.user.role === 'student') filter._id = req.user.student;
-  if (req.user.role === 'parent' && req.user.linkedStudent) filter._id = req.user.linkedStudent;
-  if (req.user.role === 'teacher') {
+  if (req.user.role === ROLES.STUDENT) filter._id = req.user.student;
+  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) filter._id = req.user.linkedStudent;
+  if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
     filter['enrollments.classRoom'] = { $in: classIds };
   }
@@ -83,52 +84,52 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  if (req.user.role === 'student' && req.user.student?.toString() !== req.params.id) {
-    return res.status(403).json({ message: 'Students can only access their own profile' });
+  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Students can only access their own profile' });
   }
-  if (req.user.role === 'parent' && req.user.linkedStudent?.toString() !== req.params.id) {
-    return res.status(403).json({ message: 'Parents can only access their linked child profile' });
+  if (req.user.role === ROLES.PARENT && req.user.linkedStudent?.toString() !== req.params.id) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can only access their linked child profile' });
   }
 
   const student = await Student.findById(req.params.id)
     .populate('enrollments.academicYear', 'name')
     .populate('enrollments.classRoom', 'name section classTeacher')
     .populate('enrollments.classRoom.classTeacher', 'firstName lastName');
-  if (!student) return res.status(404).json({ message: 'Student not found' });
-  if (req.user.role === 'teacher') {
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+  if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
     const canAccess = student.enrollments.some((enrollment) => classIds.some((id) => id.equals(enrollment.classRoom?._id || enrollment.classRoom)));
-    if (!canAccess) return res.status(403).json({ message: 'Teacher can only access assigned class students' });
+    if (!canAccess) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teacher can only access assigned class students' });
   }
   res.json(student);
 });
 
 exports.update = asyncHandler(async (req, res) => {
   const student = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-  if (!student) return res.status(404).json({ message: 'Student not found' });
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
   res.json(student);
 });
 
 exports.remove = asyncHandler(async (req, res) => {
   const student = await Student.findByIdAndUpdate(req.params.id, { status: 'inactive' }, { new: true });
-  if (!student) return res.status(404).json({ message: 'Student not found' });
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
   res.json({ deleted: true });
 });
 
 exports.addDocument = asyncHandler(async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'Document file is required' });
+  if (!req.file) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document file is required' });
   const student = await Student.findById(req.params.id);
-  if (!student) return res.status(404).json({ message: 'Student not found' });
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
   student.documents.push(await fileToDocument(req.file, req.body.type || 'other', req.body.title, 'students/documents'));
   await student.save();
-  res.status(201).json(student.documents.at(-1));
+  res.status(HTTP_STATUS.CREATED).json(student.documents.at(-1));
 });
 
 exports.promote = asyncHandler(async (req, res) => {
   const { studentIds, fromAcademicYear, toAcademicYear, toClassRoom } = req.body;
   if (!studentIds?.length || !fromAcademicYear || !toAcademicYear || !toClassRoom) {
-    return res.status(400).json({ message: 'studentIds, fromAcademicYear, toAcademicYear and toClassRoom are required' });
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'studentIds, fromAcademicYear, toAcademicYear and toClassRoom are required' });
   }
 
   const result = await Student.updateMany(

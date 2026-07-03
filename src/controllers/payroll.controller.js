@@ -1,9 +1,10 @@
 const Payroll = require('../models/Payroll');
 const asyncHandler = require('../middleware/asyncHandler');
 const { payrollPdf } = require('../services/pdf.service');
+const { HTTP_STATUS } = require('../constants');
 
 exports.create = asyncHandler(async (req, res) => {
-  res.status(201).json(await Payroll.create(req.body));
+  res.status(HTTP_STATUS.CREATED).json(await Payroll.create(req.body));
 });
 
 exports.list = asyncHandler(async (req, res) => {
@@ -23,24 +24,24 @@ exports.markPaid = asyncHandler(async (req, res) => {
     { ...req.body, status: 'paid', paidAt: req.body.paidAt || new Date() },
     { new: true, runValidators: true }
   );
-  if (!payroll) return res.status(404).json({ message: 'Payroll record not found' });
+  if (!payroll) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Payroll record not found' });
   res.json(payroll);
 });
 
 exports.update = asyncHandler(async (req, res) => {
   const payroll = await Payroll.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-  if (!payroll) return res.status(404).json({ message: 'Payroll record not found' });
+  if (!payroll) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Payroll record not found' });
   res.json(payroll);
 });
 
 exports.remove = asyncHandler(async (req, res) => {
   const payroll = await Payroll.findByIdAndDelete(req.params.id);
-  if (!payroll) return res.status(404).json({ message: 'Payroll record not found' });
+  if (!payroll) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Payroll record not found' });
   res.json({ deleted: true });
 });
 
 exports.download = asyncHandler(async (req, res) => {
   const payroll = await Payroll.findById(req.params.id).populate('teacher', 'firstName lastName employeeCode');
-  if (!payroll) return res.status(404).json({ message: 'Payroll record not found' });
+  if (!payroll) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Payroll record not found' });
   payrollPdf(res, payroll);
 });

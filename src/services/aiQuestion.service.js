@@ -1,4 +1,5 @@
 const { createLogger } = require('../utils/logger');
+const { DEFAULTS, EXAM } = require('../constants');
 
 const log = createLogger('ai-exam');
 
@@ -38,7 +39,7 @@ Mix question types appropriately for the difficulty level.`;
 }
 
 function fallbackQuestions({ subject, chapter, difficulty, questionCount, bookReference }) {
-  const count = Math.min(Math.max(questionCount, 3), 20);
+  const count = Math.min(Math.max(questionCount, EXAM.MIN_QUESTIONS), EXAM.MAX_QUESTIONS);
   const questions = [];
   const types = difficulty === 'easy' ? ['mcq', 'true_false'] : ['mcq', 'short_answer'];
 
@@ -97,7 +98,7 @@ async function callOpenAI(prompt) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const model = process.env.OPENAI_MODEL || DEFAULTS.OPENAI_MODEL;
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -106,7 +107,7 @@ async function callOpenAI(prompt) {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.4,
+      temperature: EXAM.AI_TEMPERATURE,
       messages: [
         { role: 'system', content: 'You generate school exam questions. Respond with JSON only.' },
         { role: 'user', content: prompt }

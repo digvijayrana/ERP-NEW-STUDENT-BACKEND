@@ -1,4 +1,5 @@
 const { createLogger } = require('../utils/logger');
+const { DEFAULTS, EXAM } = require('../constants');
 
 const log = createLogger('ai-student');
 
@@ -78,8 +79,8 @@ async function callOpenAI(prompt) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.3,
+      model: process.env.OPENAI_MODEL || DEFAULTS.OPENAI_MODEL,
+      temperature: EXAM.ANALYSIS_TEMPERATURE,
       messages: [
         { role: 'system', content: 'You analyze student school performance. Return JSON only.' },
         { role: 'user', content: prompt }

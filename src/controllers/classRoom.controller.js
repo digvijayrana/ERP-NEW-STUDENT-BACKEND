@@ -1,5 +1,6 @@
 const ClassRoom = require('../models/ClassRoom');
 const asyncHandler = require('../middleware/asyncHandler');
+const { HTTP_STATUS, ROLES } = require('../constants');
 
 function normalizeClassPayload(payload) {
   const next = { ...payload };
@@ -24,7 +25,7 @@ async function ensureClassTeacherIsAvailable(classTeacher, classId) {
 
   if (existing) {
     const error = new Error(`This teacher is already class teacher for ${existing.name}-${existing.section}`);
-    error.status = 400;
+    error.status = HTTP_STATUS.BAD_REQUEST;
     throw error;
   }
 }
@@ -32,11 +33,11 @@ async function ensureClassTeacherIsAvailable(classTeacher, classId) {
 exports.create = asyncHandler(async (req, res) => {
   const payload = normalizeClassPayload(req.body);
   await ensureClassTeacherIsAvailable(payload.classTeacher);
-  res.status(201).json(await ClassRoom.create(payload));
+  res.status(HTTP_STATUS.CREATED).json(await ClassRoom.create(payload));
 });
 
 exports.list = asyncHandler(async (req, res) => {
-  const filter = req.user.role === 'teacher' ? { classTeacher: req.user.teacher } : {};
+  const filter = req.user.role === ROLES.TEACHER ? { classTeacher: req.user.teacher } : {};
   const classes = await ClassRoom.find(filter)
     .populate('academicYear', 'name isActive')
     .populate('classTeacher', 'firstName lastName employeeCode')
@@ -49,12 +50,12 @@ exports.update = asyncHandler(async (req, res) => {
   const payload = normalizeClassPayload(req.body);
   await ensureClassTeacherIsAvailable(payload.classTeacher, req.params.id);
   const classRoom = await ClassRoom.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });
-  if (!classRoom) return res.status(404).json({ message: 'Class not found' });
+  if (!classRoom) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Class not found' });
   res.json(classRoom);
 });
 
 exports.remove = asyncHandler(async (req, res) => {
   const classRoom = await ClassRoom.findByIdAndDelete(req.params.id);
-  if (!classRoom) return res.status(404).json({ message: 'Class not found' });
+  if (!classRoom) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Class not found' });
   res.json({ deleted: true });
 });

@@ -2,6 +2,7 @@ const User = require('../models/User');
 const asyncHandler = require('../middleware/asyncHandler');
 const { signToken } = require('../services/token.service');
 const { createLogger } = require('../utils/logger');
+const { HTTP_STATUS } = require('../constants');
 
 const log = createLogger('auth');
 
@@ -10,7 +11,7 @@ exports.login = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: String(email || '').toLowerCase() });
   if (!user || !user.isActive || !(await user.comparePassword(password || ''))) {
     log.warn('Login failed - invalid credentials', { email: String(email || '').toLowerCase(), ip: req.ip });
-    return res.status(401).json({ message: 'Invalid email or password' });
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Invalid email or password' });
   }
 
   user.lastLoginAt = new Date();
@@ -29,7 +30,7 @@ exports.createUser = asyncHandler(async (req, res) => {
   await user.setPassword(password);
   await user.save();
   log.info('New user account created', { email: user.email, role: user.role, createdBy: req.user?.email });
-  res.status(201).json(user.toSafeJSON());
+  res.status(HTTP_STATUS.CREATED).json(user.toSafeJSON());
 });
 
 exports.listUsers = asyncHandler(async (_req, res) => {

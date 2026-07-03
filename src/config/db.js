@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { createLogger } = require('../utils/logger');
+const { DEFAULTS, DB } = require('../constants');
 
 const log = createLogger('database');
 
@@ -8,7 +9,7 @@ async function connectDb() {
     return mongoose.connection;
   }
 
-  const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/student_erp';
+  const uri = process.env.MONGODB_URI || DEFAULTS.MONGODB_URI;
   mongoose.set('strictQuery', true);
   mongoose.connection.on('error', (error) => {
     log.error('MongoDB connection error', { error: error.message });
@@ -18,7 +19,7 @@ async function connectDb() {
   });
 
   await mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 5000,
+    serverSelectionTimeoutMS: DB.SERVER_SELECTION_TIMEOUT_MS,
     autoIndex: true
   });
 

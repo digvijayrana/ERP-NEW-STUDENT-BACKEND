@@ -7,11 +7,13 @@ const Payroll = require('../models/Payroll');
 const Student = require('../models/Student');
 const Teacher = require('../models/Teacher');
 const asyncHandler = require('../middleware/asyncHandler');
+const { ROLES, PAGINATION } = require('../constants');
 
 exports.getDashboard = asyncHandler(async (req, res) => {
   const activeYear = await AcademicYear.findOne({ isActive: true }).lean();
-  const rangeDays = Number(req.query.rangeDays || 30);
-  const windowDays = [7, 30, 365].includes(rangeDays) ? rangeDays : 30;
+  const allowedRanges = [7, 30, 365];
+  const rangeDays = Number(req.query.rangeDays || allowedRanges[1]);
+  const windowDays = allowedRanges.includes(rangeDays) ? rangeDays : allowedRanges[1];
   const fromDate = new Date();
   fromDate.setDate(fromDate.getDate() - windowDays);
 
@@ -22,7 +24,7 @@ exports.getDashboard = asyncHandler(async (req, res) => {
   let examFilter = {};
   let submissionFilter = { status: 'graded', submittedAt: { $gte: fromDate } };
 
-  if (req.user.role === 'teacher') {
+  if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
     studentFilter = { status: 'active', 'enrollments.classRoom': { $in: classIds } };
     feeFilter = { classRoom: { $in: classIds } };
@@ -33,7 +35,7 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     submissionFilter.exam = { $in: examIds };
   }
 
-  if (req.user.role === 'student') {
+  if (req.user.role === ROLES.STUDENT) {
     studentFilter = { _id: req.user.student };
     feeFilter = { student: req.user.student };
     teacherFilter = { _id: null };
@@ -44,7 +46,7 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     examFilter = { classRoom: { $in: classIds }, status: { $in: ['published', 'closed'] } };
   }
 
-  if (req.user.role === 'parent' && req.user.linkedStudent) {
+  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) {
     studentFilter = { _id: req.user.linkedStudent };
     feeFilter = { student: req.user.linkedStudent };
     teacherFilter = { _id: null };
@@ -61,7 +63,7 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     FeeInvoice.find(feeFilter).lean({ virtuals: true }),
     Payroll.find(payrollFilter).lean({ virtuals: true }),
     Exam.countDocuments(examFilter),
-    ExamSubmission.find(submissionFilter).sort({ submittedAt: -1 }).limit(5)
+    ExamSubmission.find(submissionFilter).sort({ submittedAt: -1 }).limit(PAGINATION.DASHBOARD_RECENT_SUBMISSIONS)
       .populate('student', 'firstName lastName admissionNumber')
       .populate('exam', 'title subject')
       .lean()

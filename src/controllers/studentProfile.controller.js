@@ -6,22 +6,24 @@ const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { analyzeStudentProfile } = require('../services/aiStudentInsight.service');
+const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 
 const log = createLogger('students');
+const PERCENTAGE_MULTIPLIER = 100;
 
 async function assertStudentAccess(req, studentId) {
-  if (req.user.role === 'student' && req.user.student?.toString() !== studentId) {
-    return { error: 'Students can only access their own profile', status: 403 };
+  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== studentId) {
+    return { error: 'Students can only access their own profile', status: HTTP_STATUS.FORBIDDEN };
   }
-  if (req.user.role === 'parent' && req.user.linkedStudent?.toString() !== studentId) {
-    return { error: 'Parents can only access their linked child profile', status: 403 };
+  if (req.user.role === ROLES.PARENT && req.user.linkedStudent?.toString() !== studentId) {
+    return { error: 'Parents can only access their linked child profile', status: HTTP_STATUS.FORBIDDEN };
   }
-  if (req.user.role === 'teacher') {
+  if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
     const student = await Student.findById(studentId).lean();
-    if (!student) return { error: 'Student not found', status: 404 };
+    if (!student) return { error: 'Student not found', status: HTTP_STATUS.NOT_FOUND };
     const canAccess = student.enrollments?.some((e) => classIds.some((id) => id.equals(e.classRoom)));
-    if (!canAccess) return { error: 'Teacher can only access assigned class students', status: 403 };
+    if (!canAccess) return { error: 'Teacher can only access assigned class students', status: HTTP_STATUS.FORBIDDEN };
   }
   return null;
 }
@@ -35,13 +37,13 @@ exports.getProfile = asyncHandler(async (req, res) => {
     .populate('enrollments.classRoom', 'name section monthlyFee classTeacher')
     .populate('enrollments.classRoom.classTeacher', 'firstName lastName phone email');
 
-  if (!student) return res.status(404).json({ message: 'Student not found' });
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
   const latestEnrollment = student.enrollments?.filter((e) => e.status === 'studying').pop()
     || student.enrollments?.[student.enrollments.length - 1];
 
   const [attendanceRecords, examSubmissions, feeInvoices, classMates] = await Promise.all([
-    Attendance.find({ student: student._id }).sort({ date: -1 }).limit(90).lean(),
+    Attendance.find({ student: student._id }).sort({ date: -1 }).limit(PAGINATION.MAX_RECENT_ATTENDANCE).lean(),
     ExamSubmission.find({ student: student._id, status: 'graded' })
       .populate({ path: 'exam', select: 'title subject chapter totalMarks classRoom', populate: { path: 'classRoom', select: 'name section' } })
       .sort({ submittedAt: -1 })
@@ -60,7 +62,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
   const totalAttendance = attendanceRecords.length;
   const present = attendanceRecords.filter((r) => ['present', 'late', 'half_day'].includes(r.status)).length;
   const absent = attendanceRecords.filter((r) => r.status === 'absent').length;
-  const attendancePercentage = totalAttendance ? Math.round((present / totalAttendance) * 100) : 100;
+  const attendancePercentage = totalAttendance ? Math.round((present / totalAttendance) * PERCENTAGE_MULTIPLIER) : PERCENTAGE_MULTIPLIER;
 
   const examResults = examSubmissions.map((s) => ({
     examId: s.exam?._id,
@@ -126,14 +128,14 @@ exports.getProfile = asyncHandler(async (req, res) => {
       present,
       absent,
       total: totalAttendance,
-      recent: attendanceRecords.slice(0, 30).map((r) => ({ date: r.date, status: r.status }))
+      recent: attendanceRecords.slice(0, PAGINATION.MAX_RECENT_ITEMS).map((r) => ({ date: r.date, status: r.status }))
     },
     academics: {
       averageScore,
       examCount: examResults.length,
-      examResults: examResults.slice(0, 10),
+      examResults: examResults.slice(0, PAGINATION.MAX_EXAM_RESULTS),
       subjectBreakdown,
-      performanceTrend: examResults.slice(0, 6).reverse().map((e, i) => ({
+      performanceTrend: examResults.slice(0, PAGINATION.MAX_TREND_ITEMS).reverse().map((e, i) => ({
         label: e.title?.slice(0, 20) || `Exam ${i + 1}`,
         score: e.percentage
       }))
@@ -142,7 +144,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
       status: feeStatus,
       totalDue: totalFeeDue,
       totalPaid: totalFeePaid,
-      invoices: feeInvoices.slice(0, 8).map((inv) => ({
+      invoices: feeInvoices.slice(0, PAGINATION.MAX_FEE_INVOICES).map((inv) => ({
         invoiceNumber: inv.invoiceNumber,
         status: inv.status,
         balanceAmount: inv.balanceAmount,

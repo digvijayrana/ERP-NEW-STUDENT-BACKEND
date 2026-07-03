@@ -2,10 +2,11 @@ const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const Timetable = require('../models/Timetable');
 const asyncHandler = require('../middleware/asyncHandler');
+const { HTTP_STATUS, ROLES } = require('../constants');
 
 async function readableClassFilter(req) {
-  if (req.user.role === 'admin') return {};
-  if (req.user.role === 'teacher') {
+  if (req.user.role === ROLES.ADMIN) return {};
+  if (req.user.role === ROLES.TEACHER) {
     return { classRoom: { $in: await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id') } };
   }
   const student = await Student.findById(req.user.student).select('enrollments');
@@ -15,7 +16,7 @@ async function readableClassFilter(req) {
 
 exports.list = asyncHandler(async (req, res) => {
   const filter = await readableClassFilter(req);
-  if (req.query.classRoom && req.user.role === 'admin') filter.classRoom = req.query.classRoom;
+  if (req.query.classRoom && req.user.role === ROLES.ADMIN) filter.classRoom = req.query.classRoom;
   const rows = await Timetable.find(filter)
     .populate('classRoom', 'name section')
     .populate('periods.teacher', 'firstName lastName employeeCode')
@@ -30,5 +31,5 @@ exports.upsert = asyncHandler(async (req, res) => {
     { classRoom, academicYear, dayOfWeek, periods },
     { new: true, upsert: true, runValidators: true }
   );
-  res.status(201).json(row);
+  res.status(HTTP_STATUS.CREATED).json(row);
 });
