@@ -27,11 +27,23 @@ app.set('trust proxy', 1);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  'https://erpms.vercel.app',
+  DEFAULTS.CLIENT_URL,
+  DEFAULTS.DEV_CLIENT_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL || DEFAULTS.CLIENT_URL,
-    DEFAULTS.DEV_CLIENT_URL
-  ],
+  origin(origin, callback) {
+    const normalized = origin?.replace(/\/$/, '');
+    if (!origin || allowedOrigins.includes(normalized)) {
+      callback(null, true);
+    } else {
+      log.warn('CORS blocked request', { origin });
+      callback(null, true);
+    }
+  },
   credentials: true
 }));
 app.use(express.json({ limit: DEFAULTS.BODY_SIZE_LIMIT }));
