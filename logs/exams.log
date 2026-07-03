@@ -1,0 +1,65 @@
+[2026-07-03 19:43:53] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:43:53] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:43:58] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:43:58] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:51:16] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:51:16] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:54:14] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:54:14] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:55:34] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 19:55:34] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:00:02] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:00:02] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:03:05] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:03:05] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:04:59] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:04:59] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:06:23] INFO  [exams] Exam list fetched | user="teacher@schoolerp.local", count=0
+[2026-07-03 20:06:23] INFO  [exams] Exam results fetched | user="teacher@schoolerp.local", count=0
+[2026-07-03 20:07:23] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:07:23] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:07:50] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:07:50] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:07:52] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:07:52] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=0
+[2026-07-03 20:09:24] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:09:24] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:20:44] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:20:44] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:21:42] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:21:42] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:07] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:07] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:42] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:42] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:50] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:51] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:59] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:22:59] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:54:35] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:54:35] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:55:17] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 20:55:17] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:30:16] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:30:16] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:30:17] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:30:17] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:31:40] INFO  [exams] Generating exam questions | teacher="admin@schoolerp.local", subject="Maths", chapter="Fraction", difficulty="medium", questionCount=10
+[2026-07-03 21:31:40] INFO  [exams] Exam draft created with AI questions | examId="6a47dce4742225d332840ecb", questionCount=10, provider="fallback", aiGenerated=false
+[2026-07-03 21:31:41] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=1
+[2026-07-03 21:31:41] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:31:53] INFO  [exams] Exam published for students | examId="6a47dce4742225d332840ecb", classRoom="6a47c8888e8d402c7ba583ab", user="admin@schoolerp.local"
+[2026-07-03 21:31:53] INFO  [exams] Exam results fetched | user="admin@schoolerp.local", count=0
+[2026-07-03 21:31:53] INFO  [exams] Exam list fetched | user="admin@schoolerp.local", count=1
+[2026-07-03 21:31:58] INFO  [exams] Class exam report generated | examId="6a47dce4742225d332840ecb", attempted=0, averageScore=0, user="admin@schoolerp.local"
+[2026-07-03 21:32:01] INFO  [exams] Class exam report generated | examId="6a47dce4742225d332840ecb", attempted=0, averageScore=0, user="admin@schoolerp.local"
+[2026-07-03 21:32:36] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=0
+[2026-07-03 21:32:36] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:32:47] INFO  [exams] Student started exam attempt | examId="6a47dce4742225d332840ecb", studentId="6a47c8888e8d402c7ba583ae"
+[2026-07-03 21:34:44] INFO  [exams] Exam submitted and auto-graded | examId="6a47dce4742225d332840ecb", studentId="6a47c8888e8d402c7ba583ae", score=15, percentage=100, grade="A+"
+[2026-07-03 21:34:44] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:34:44] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:39:19] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:39:19] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:39:26] INFO  [exams] Exam list fetched | user="student@schoolerp.local", count=1
+[2026-07-03 21:39:26] INFO  [exams] Exam results fetched | user="student@schoolerp.local", count=1

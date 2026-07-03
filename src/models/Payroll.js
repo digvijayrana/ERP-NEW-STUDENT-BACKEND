@@ -1,0 +1,26 @@
+const mongoose = require('mongoose');
+
+const payrollSchema = new mongoose.Schema(
+  {
+    teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
+    month: { type: Number, min: 1, max: 12, required: true },
+    year: { type: Number, required: true },
+    basicSalary: { type: Number, required: true, min: 0 },
+    allowances: { type: Number, default: 0, min: 0 },
+    deductions: { type: Number, default: 0, min: 0 },
+    paidAt: Date,
+    paymentMode: { type: String, enum: ['cash', 'bank_transfer', 'upi', 'cheque'], default: 'bank_transfer' },
+    status: { type: String, enum: ['pending', 'paid'], default: 'pending' },
+    remarks: String
+  },
+  { timestamps: true }
+);
+
+payrollSchema.virtual('netSalary').get(function netSalary() {
+  return this.basicSalary + this.allowances - this.deductions;
+});
+
+payrollSchema.index({ teacher: 1, month: 1, year: 1 }, { unique: true });
+payrollSchema.set('toJSON', { virtuals: true });
+
+module.exports = mongoose.model('Payroll', payrollSchema);

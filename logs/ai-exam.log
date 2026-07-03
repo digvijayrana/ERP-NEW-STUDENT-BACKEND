@@ -1,0 +1,2 @@
+[2026-07-03 21:31:40] INFO  [ai-exam] Starting AI question generation | subject="Maths", chapter="Fraction", difficulty="medium", count=10
+[2026-07-03 21:31:40] WARN  [ai-exam] OPENAI_API_KEY not set; using built-in question generator
