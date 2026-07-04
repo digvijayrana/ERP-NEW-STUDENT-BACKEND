@@ -1,9 +1,19 @@
 const Attendance = require('../models/Attendance');
 const TeacherAttendance = require('../models/TeacherAttendance');
+const Holiday = require('../models/Holiday');
 const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { HTTP_STATUS, ROLES } = require('../constants');
+
+async function isBlockedDate(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  if (d.getDay() === 0) return 'Cannot mark attendance on Sunday';
+  const holiday = await Holiday.findOne({ date: d });
+  if (holiday) return `Cannot mark attendance on holiday: ${holiday.name}`;
+  return null;
+}
 
 async function teacherClassIds(req) {
   if (req.user.role !== ROLES.TEACHER) return null;
@@ -21,7 +31,6 @@ exports.list = asyncHandler(async (req, res) => {
     const selectedChild = req.query.student && childIds.map(String).includes(String(req.query.student)) ? req.query.student : null;
     filter.student = selectedChild || { $in: childIds };
   }
-  if (req.user.role === ROLES.TEACHER) filter.classRoom = { $in: await teacherClassIds(req) };
 
   const records = await Attendance.find(filter)
     .populate('student', 'firstName lastName admissionNumber')
@@ -34,6 +43,11 @@ exports.list = asyncHandler(async (req, res) => {
 exports.mark = asyncHandler(async (req, res) => {
   const { records } = req.body;
   if (!Array.isArray(records) || records.length === 0) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Attendance records are required' });
+
+  for (const record of records) {
+    const blocked = await isBlockedDate(record.date);
+    if (blocked) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: blocked });
+  }
 
   const allowedClassIds = await teacherClassIds(req);
   if (allowedClassIds) {
@@ -60,9 +74,7 @@ exports.mark = asyncHandler(async (req, res) => {
 });
 
 exports.studentOptions = asyncHandler(async (req, res) => {
-  const filter = {};
-  if (req.user.role === ROLES.TEACHER) filter['enrollments.classRoom'] = { $in: await teacherClassIds(req) };
-  const students = await Student.find(filter).select('admissionNumber firstName lastName enrollments');
+  const students = await Student.find().select('admissionNumber firstName lastName enrollments');
   res.json(students);
 });
 
@@ -70,6 +82,9 @@ exports.selfMark = asyncHandler(async (req, res) => {
   const { status = 'present', remarks = '' } = req.body;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  const blocked = await isBlockedDate(today);
+  if (blocked) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: blocked });
 
   if (req.user.role === ROLES.STUDENT) {
     const studentId = req.user.student;

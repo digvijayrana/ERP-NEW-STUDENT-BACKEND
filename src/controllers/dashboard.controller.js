@@ -84,7 +84,7 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     return sum + Math.max(total - paid, 0);
   }, 0);
   const payrollDue = payrolls
-    .filter((payroll) => payroll.status === 'pending' || (payroll.paidAt && new Date(payroll.paidAt) >= fromDate))
+    .filter((payroll) => payroll.status === 'pending')
     .reduce((sum, payroll) => sum + payroll.basicSalary + payroll.allowances - payroll.deductions, 0);
 
   const averageExamScore = recentSubmissions.length

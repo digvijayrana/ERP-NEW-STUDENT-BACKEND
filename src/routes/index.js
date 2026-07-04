@@ -11,6 +11,7 @@ router.use('/students', require('./student.routes'));
 router.use('/fees', require('./fee.routes'));
 router.use('/payroll', authorize('admin'), require('./payroll.routes'));
 router.use('/attendance', require('./attendance.routes'));
+router.use('/holidays', require('./holiday.routes'));
 router.use('/timetable', require('./timetable.routes'));
 router.use('/exams', require('./exam.routes'));
 
