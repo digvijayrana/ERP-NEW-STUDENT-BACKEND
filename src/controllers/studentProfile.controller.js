@@ -15,8 +15,9 @@ async function assertStudentAccess(req, studentId) {
   if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== studentId) {
     return { error: 'Students can only access their own profile', status: HTTP_STATUS.FORBIDDEN };
   }
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent?.toString() !== studentId) {
-    return { error: 'Parents can only access their linked child profile', status: HTTP_STATUS.FORBIDDEN };
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
+    if (!childIds.includes(studentId)) return { error: 'Parents can only access their linked child profile', status: HTTP_STATUS.FORBIDDEN };
   }
   if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');

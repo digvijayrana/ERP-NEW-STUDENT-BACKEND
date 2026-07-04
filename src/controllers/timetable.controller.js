@@ -9,6 +9,14 @@ async function readableClassFilter(req) {
   if (req.user.role === ROLES.TEACHER) {
     return { classRoom: { $in: await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id') } };
   }
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const selectedChild = req.query.childId && childIds.map(String).includes(String(req.query.childId)) ? req.query.childId : childIds[0];
+    if (!selectedChild) return { classRoom: null };
+    const student = await Student.findById(selectedChild).select('enrollments');
+    const current = student?.enrollments?.filter((item) => item.status === 'studying').at(-1);
+    return current ? { classRoom: current.classRoom } : { classRoom: null };
+  }
   const student = await Student.findById(req.user.student).select('enrollments');
   const current = student?.enrollments?.filter((item) => item.status === 'studying').at(-1);
   return current ? { classRoom: current.classRoom } : { classRoom: null };

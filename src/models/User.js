@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
     teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
     linkedStudent: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
+    linkedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Student' }],
     isActive: { type: Boolean, default: true },
     lastLoginAt: Date
   },
@@ -26,6 +27,9 @@ userSchema.methods.comparePassword = function comparePassword(password) {
 };
 
 userSchema.methods.toSafeJSON = function toSafeJSON() {
+  const linked = this.linkedStudents?.length
+    ? this.linkedStudents
+    : this.linkedStudent ? [this.linkedStudent] : [];
   return {
     id: this._id,
     name: this.name,
@@ -34,6 +38,7 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     teacher: this.teacher,
     student: this.student,
     linkedStudent: this.linkedStudent,
+    linkedStudents: linked,
     isActive: this.isActive
   };
 };

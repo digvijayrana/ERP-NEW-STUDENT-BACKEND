@@ -46,14 +46,15 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     examFilter = { classRoom: { $in: classIds }, status: { $in: ['published', 'closed'] } };
   }
 
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) {
-    studentFilter = { _id: req.user.linkedStudent };
-    feeFilter = { student: req.user.linkedStudent };
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    studentFilter = { _id: { $in: childIds } };
+    feeFilter = { student: { $in: childIds } };
     teacherFilter = { _id: null };
     payrollFilter = { _id: null };
-    submissionFilter.student = req.user.linkedStudent;
-    const student = await Student.findById(req.user.linkedStudent).lean();
-    const classIds = (student?.enrollments || []).map((e) => e.classRoom);
+    submissionFilter.student = { $in: childIds };
+    const children = await Student.find({ _id: { $in: childIds } }).lean();
+    const classIds = children.flatMap((s) => (s.enrollments || []).map((e) => e.classRoom));
     examFilter = { classRoom: { $in: classIds }, status: { $in: ['published', 'closed'] } };
   }
 

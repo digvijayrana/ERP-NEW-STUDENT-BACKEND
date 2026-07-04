@@ -40,7 +40,11 @@ exports.listInvoices = asyncHandler(async (req, res) => {
   if (req.query.student) filter.student = req.query.student;
   if (req.query.status) filter.status = req.query.status;
   if (req.user.role === ROLES.STUDENT) filter.student = req.user.student;
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) filter.student = req.user.linkedStudent;
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const selectedChild = req.query.student && childIds.map(String).includes(String(req.query.student)) ? req.query.student : null;
+    filter.student = selectedChild || { $in: childIds };
+  }
 
   const invoices = await FeeInvoice.find(filter)
     .populate('student', 'firstName lastName admissionNumber')
@@ -68,8 +72,9 @@ exports.downloadInvoice = asyncHandler(async (req, res) => {
   if (req.user.role === ROLES.STUDENT && invoice.student._id.toString() !== req.user.student?.toString()) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Students can download only their own fee invoice' });
   }
-  if (req.user.role === ROLES.PARENT && invoice.student._id.toString() !== req.user.linkedStudent?.toString()) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can download only their linked child fee invoice' });
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
+    if (!childIds.includes(invoice.student._id.toString())) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can download only their linked child fee invoice' });
   }
   feeInvoicePdf(res, invoice);
 });

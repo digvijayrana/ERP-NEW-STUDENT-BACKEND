@@ -1,4 +1,5 @@
 const Attendance = require('../models/Attendance');
+const TeacherAttendance = require('../models/TeacherAttendance');
 const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -15,7 +16,11 @@ exports.list = asyncHandler(async (req, res) => {
   if (req.query.classRoom) filter.classRoom = req.query.classRoom;
   if (req.query.academicYear) filter.academicYear = req.query.academicYear;
   if (req.user.role === ROLES.STUDENT) filter.student = req.user.student;
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) filter.student = req.user.linkedStudent;
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const selectedChild = req.query.student && childIds.map(String).includes(String(req.query.student)) ? req.query.student : null;
+    filter.student = selectedChild || { $in: childIds };
+  }
   if (req.user.role === ROLES.TEACHER) filter.classRoom = { $in: await teacherClassIds(req) };
 
   const records = await Attendance.find(filter)
@@ -59,4 +64,77 @@ exports.studentOptions = asyncHandler(async (req, res) => {
   if (req.user.role === ROLES.TEACHER) filter['enrollments.classRoom'] = { $in: await teacherClassIds(req) };
   const students = await Student.find(filter).select('admissionNumber firstName lastName enrollments');
   res.json(students);
+});
+
+exports.selfMark = asyncHandler(async (req, res) => {
+  const { status = 'present', remarks = '' } = req.body;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (req.user.role === ROLES.STUDENT) {
+    const studentId = req.user.student;
+    if (!studentId) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'No student linked to this account' });
+
+    const student = await Student.findById(studentId);
+    if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student record not found' });
+
+    const latestEnrollment = student.enrollments?.[student.enrollments.length - 1];
+    if (!latestEnrollment) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'No active enrollment found' });
+
+    const record = await Attendance.findOneAndUpdate(
+      { student: studentId, date: today },
+      {
+        $setOnInsert: {
+          student: studentId,
+          classRoom: latestEnrollment.classRoom,
+          academicYear: latestEnrollment.academicYear,
+          date: today,
+          status,
+          remarks
+        }
+      },
+      { upsert: true, new: true }
+    ).populate('classRoom', 'name section');
+
+    return res.status(HTTP_STATUS.CREATED).json({ type: 'student', record });
+  }
+
+  if (req.user.role === ROLES.TEACHER) {
+    const teacherId = req.user.teacher;
+    if (!teacherId) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'No teacher linked to this account' });
+
+    const record = await TeacherAttendance.findOneAndUpdate(
+      { teacher: teacherId, date: today },
+      {
+        $setOnInsert: {
+          teacher: teacherId,
+          date: today,
+          status,
+          remarks
+        }
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.status(HTTP_STATUS.CREATED).json({ type: 'teacher', record });
+  }
+
+  return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Self-attendance is only available for students and teachers' });
+});
+
+exports.selfStatus = asyncHandler(async (req, res) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (req.user.role === ROLES.STUDENT && req.user.student) {
+    const record = await Attendance.findOne({ student: req.user.student, date: today });
+    return res.json({ marked: !!record, status: record?.status || null });
+  }
+
+  if (req.user.role === ROLES.TEACHER && req.user.teacher) {
+    const record = await TeacherAttendance.findOne({ teacher: req.user.teacher, date: today });
+    return res.json({ marked: !!record, status: record?.status || null });
+  }
+
+  return res.json({ marked: false, status: null });
 });

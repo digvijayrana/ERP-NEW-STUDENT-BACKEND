@@ -25,8 +25,19 @@ exports.me = asyncHandler(async (req, res) => {
 });
 
 exports.createUser = asyncHandler(async (req, res) => {
-  const { name, email, password, role, teacher, student, linkedStudent } = req.body;
-  const user = new User({ name, email, role, teacher, student, linkedStudent, passwordHash: 'pending' });
+  const { name, email, password, role, teacher, student, linkedStudent, linkedStudents } = req.body;
+  const userData = { name, email, role, passwordHash: 'pending' };
+  if (teacher) userData.teacher = teacher;
+  if (student) userData.student = student;
+  const children = Array.isArray(linkedStudents) ? linkedStudents.filter(Boolean) : [];
+  if (children.length) {
+    userData.linkedStudents = children;
+    userData.linkedStudent = children[0];
+  } else if (linkedStudent) {
+    userData.linkedStudent = linkedStudent;
+    userData.linkedStudents = [linkedStudent];
+  }
+  const user = new User(userData);
   await user.setPassword(password);
   await user.save();
   log.info('New user account created', { email: user.email, role: user.role, createdBy: req.user?.email });
@@ -37,6 +48,7 @@ exports.listUsers = asyncHandler(async (_req, res) => {
   const users = await User.find().select('-passwordHash')
     .populate('teacher', 'firstName lastName')
     .populate('student', 'firstName lastName admissionNumber')
-    .populate('linkedStudent', 'firstName lastName admissionNumber');
+    .populate('linkedStudent', 'firstName lastName admissionNumber')
+    .populate('linkedStudents', 'firstName lastName admissionNumber');
   res.json(users);
 });

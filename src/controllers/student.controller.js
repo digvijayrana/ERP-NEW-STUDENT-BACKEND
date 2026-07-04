@@ -70,7 +70,10 @@ exports.list = asyncHandler(async (req, res) => {
   if (req.query.classRoom) filter['enrollments.classRoom'] = req.query.classRoom;
   if (req.query.status) filter.status = req.query.status;
   if (req.user.role === ROLES.STUDENT) filter._id = req.user.student;
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) filter._id = req.user.linkedStudent;
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    filter._id = { $in: childIds };
+  }
   if (req.user.role === ROLES.TEACHER) {
     const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
     filter['enrollments.classRoom'] = { $in: classIds };
@@ -87,8 +90,9 @@ exports.get = asyncHandler(async (req, res) => {
   if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Students can only access their own profile' });
   }
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can only access their linked child profile' });
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
+    if (!childIds.includes(req.params.id)) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can only access their linked child profile' });
   }
 
   const student = await Student.findById(req.params.id)

@@ -26,11 +26,10 @@ async function accessibleClassFilter(req) {
       .map((e) => e.classRoom);
     return { classRoom: { $in: enrolledClassIds }, status: 'published' };
   }
-  if (req.user.role === ROLES.PARENT && req.user.linkedStudent) {
-    const student = await Student.findById(req.user.linkedStudent).lean();
-    const enrolledClassIds = (student?.enrollments || [])
-      .filter((e) => e.status === 'studying')
-      .map((e) => e.classRoom);
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const children = await Student.find({ _id: { $in: childIds } }).lean();
+    const enrolledClassIds = children.flatMap((s) => (s.enrollments || []).filter((e) => e.status === 'studying').map((e) => e.classRoom));
     return { classRoom: { $in: enrolledClassIds }, status: { $in: ['published', 'closed'] } };
   }
   return {};
@@ -369,8 +368,9 @@ exports.results = asyncHandler(async (req, res) => {
 
   if (req.user.role === ROLES.STUDENT) {
     filter.student = req.user.student;
-  } else if (req.user.role === ROLES.PARENT && req.user.linkedStudent) {
-    filter.student = req.user.linkedStudent;
+  } else if (req.user.role === ROLES.PARENT) {
+    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    filter.student = { $in: childIds };
   } else if (req.user.role === ROLES.TEACHER) {
     const classIds = await teacherClassIds(req);
     const examIds = await Exam.find({ classRoom: { $in: classIds } }).distinct('_id');
