@@ -18,5 +18,6 @@ router.get('/:id', authorize('admin', 'teacher', 'student', 'parent'), controlle
 router.patch('/:id', authorize('admin'), controller.update);
 router.delete('/:id', authorize('admin'), controller.remove);
 router.post('/:id/documents', authorize('admin'), upload.single('document'), controller.addDocument);
+router.post('/:id/verify-document', authorize('admin'), controller.verifyDocument);
 
 module.exports = router;

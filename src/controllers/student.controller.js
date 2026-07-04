@@ -38,6 +38,7 @@ exports.createAdmission = asyncHandler(async (req, res) => {
     ...(payload.student || {}),
     admissionNumber: await nextAdmissionNumber(),
     guardians: payload.guardians || [],
+    previousSchoolDetails: payload.previousSchoolDetails || undefined,
     documents,
     enrollments: [
       {
@@ -161,4 +162,19 @@ exports.promote = asyncHandler(async (req, res) => {
   );
 
   res.json({ promoted: result.modifiedCount });
+});
+
+exports.verifyDocument = asyncHandler(async (req, res) => {
+  const { documentId, action, reason } = req.body;
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const doc = student.documents.id(documentId);
+  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  doc.status = action === 'approve' ? 'approved' : 'rejected';
+  doc.rejectReason = action === 'reject' ? (reason || 'Please reupload with correct document') : '';
+  await student.save();
+
+  res.json({ message: `Document ${doc.status}`, documents: student.documents });
 });

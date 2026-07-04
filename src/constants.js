@@ -3,7 +3,7 @@ module.exports = {
     PORT: 5000,
     HOST: '0.0.0.0',
     JWT_SECRET_FALLBACK: 'change-this-secret',
-    JWT_EXPIRES_IN: '8h',
+    JWT_EXPIRES_IN: '30m',
     MONGODB_URI: 'mongodb://127.0.0.1:27017/student_erp',
     CLIENT_URL: 'http://localhost:4200',
     DEV_CLIENT_URL: 'http://localhost:3000',

@@ -22,6 +22,28 @@ const teacherSchema = new mongoose.Schema(
       city: String,
       state: String,
       pincode: String
+    },
+    experience: [{
+      instituteName: { type: String, trim: true },
+      designation: { type: String, trim: true },
+      fromDate: Date,
+      toDate: Date,
+      description: { type: String, trim: true },
+      document: { url: String, originalName: String, uploadedAt: Date }
+    }],
+    education: [{
+      instituteName: { type: String, trim: true },
+      degree: { type: String, trim: true },
+      fieldOfStudy: { type: String, trim: true },
+      fromDate: Date,
+      toDate: Date,
+      grade: { type: String, trim: true },
+      document: { url: String, originalName: String, uploadedAt: Date }
+    }],
+    documents: {
+      idProof: { url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
+      resume: { url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
+      certificates: [{ url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String }]
     }
   },
   { timestamps: true }

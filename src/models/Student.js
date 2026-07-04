@@ -17,7 +17,9 @@ const documentSchema = new mongoose.Schema(
     storageKey: String,
     mimeType: String,
     size: Number,
-    uploadedAt: { type: Date, default: Date.now }
+    uploadedAt: { type: Date, default: Date.now },
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    rejectReason: { type: String, trim: true }
   },
   { _id: true }
 );
@@ -79,6 +81,14 @@ const studentSchema = new mongoose.Schema(
       city: { type: String, required: true },
       state: { type: String, required: true },
       pincode: { type: String, required: true }
+    },
+    previousSchoolDetails: {
+      schoolName: { type: String, trim: true },
+      address: { type: String, trim: true },
+      lastClass: { type: String, trim: true },
+      yearOfPassing: Number,
+      reasonForLeaving: { type: String, trim: true },
+      tcNumber: { type: String, trim: true }
     },
     guardians: [guardianSchema],
     documents: [documentSchema],
