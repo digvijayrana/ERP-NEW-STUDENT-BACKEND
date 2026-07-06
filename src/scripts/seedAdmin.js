@@ -10,20 +10,26 @@ async function seedAdmin() {
   const existing = await User.findOne({ email });
 
   if (existing) {
-    console.log(`Admin already exists: ${email}`);
+    if (existing.role !== 'super_admin') {
+      existing.role = 'super_admin';
+      await existing.save();
+      console.log(`Existing admin upgraded to super_admin: ${email}`);
+    } else {
+      console.log(`Super Admin already exists: ${email}`);
+    }
     process.exit(0);
   }
 
   const user = new User({
     name: process.env.ADMIN_NAME || 'System Admin',
     email,
-    role: 'admin',
+    role: 'super_admin',
     passwordHash: 'pending'
   });
   await user.setPassword(password);
   await user.save();
 
-  console.log(`Admin created: ${email}`);
+  console.log(`Super Admin created: ${email}`);
   console.log(`Temporary password: ${password}`);
   process.exit(0);
 }

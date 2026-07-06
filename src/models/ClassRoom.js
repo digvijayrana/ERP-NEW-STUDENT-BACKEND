@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { auditFieldSchema } = require('../utils/auditFields');
 
 const classRoomSchema = new mongoose.Schema(
   {
@@ -13,7 +14,9 @@ const classRoomSchema = new mongoose.Schema(
         teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' }
       }
     ],
-    monthlyFee: { type: Number, default: 0, min: 0 }
+    monthlyFee: { type: Number, default: 0, min: 0 },
+    status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    ...auditFieldSchema
   },
   { timestamps: true }
 );

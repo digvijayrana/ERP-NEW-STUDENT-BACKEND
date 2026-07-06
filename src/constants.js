@@ -32,8 +32,11 @@ module.exports = {
   },
 
   ROLES: {
+    SUPER_ADMIN: 'super_admin',
     ADMIN: 'admin',
     TEACHER: 'teacher',
+    RECEPTION: 'reception',
+    ACCOUNTANT: 'accountant',
     STUDENT: 'student',
     PARENT: 'parent'
   },
@@ -72,7 +75,9 @@ module.exports = {
   },
 
   PAGINATION: {
-    DEFAULT_PAGE_SIZE: 8,
+    DEFAULT_PAGE_SIZE: 10,
+    MAX_PAGE_SIZE: 100,
+    BULK_PAGE_SIZE: 500,
     MAX_RECENT_ATTENDANCE: 90,
     MAX_RECENT_ITEMS: 30,
     MAX_TREND_ITEMS: 6,

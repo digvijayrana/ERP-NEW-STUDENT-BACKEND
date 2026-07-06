@@ -23,6 +23,9 @@ async function connectDb() {
     autoIndex: true
   });
 
+  const { ensureDefaultRoles } = require('../services/permission.service');
+  await ensureDefaultRoles();
+
   log.info('MongoDB connected successfully', { database: mongoose.connection.name });
   return mongoose.connection;
 }

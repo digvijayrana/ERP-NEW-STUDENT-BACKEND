@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const controller = require('../controllers/student.controller');
-const { authorize } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
 const admissionUpload = upload.fields([
@@ -10,14 +10,19 @@ const admissionUpload = upload.fields([
   { name: 'otherDocuments', maxCount: 10 }
 ]);
 
-router.post('/admissions', authorize('admin'), admissionUpload, controller.createAdmission);
-router.post('/promotions', authorize('admin'), controller.promote);
-router.get('/', authorize('admin', 'teacher', 'student', 'parent'), controller.list);
-router.get('/:id/profile', authorize('admin', 'teacher', 'student', 'parent'), require('../controllers/studentProfile.controller').getProfile);
-router.get('/:id', authorize('admin', 'teacher', 'student', 'parent'), controller.get);
-router.patch('/:id', authorize('admin'), controller.update);
-router.delete('/:id', authorize('admin'), controller.remove);
-router.post('/:id/documents', authorize('admin'), upload.single('document'), controller.addDocument);
-router.post('/:id/verify-document', authorize('admin'), controller.verifyDocument);
+router.post('/admissions', requirePermission('students', 'create'), admissionUpload, controller.createAdmission);
+router.post('/promotions', requirePermission('students', 'edit'), controller.promote);
+router.get('/', requirePermission('students', 'view'), controller.list);
+router.get('/:id/profile', requirePermission('students', 'view'), require('../controllers/studentProfile.controller').getProfile);
+router.get('/:id', requirePermission('students', 'view'), controller.get);
+router.patch('/:id', requirePermission('students', 'edit'), controller.update);
+router.patch('/:id/status', requirePermission('students', 'edit'), controller.updateStatus);
+router.delete('/:id', requirePermission('students', 'deactivate'), controller.remove);
+router.post('/:id/documents', requirePermission('students', 'edit'), upload.single('document'), controller.addDocument);
+router.put('/:id/documents/:documentId', requirePermission('students', 'edit'), upload.single('document'), controller.replaceDocument);
+router.delete('/:id/documents/:documentId', requirePermission('students', 'edit'), controller.deleteDocument);
+router.get('/:id/documents/:documentId/file', requirePermission('students', 'view'), controller.streamDocument);
+router.get('/:id/documents/:documentId/url', requirePermission('students', 'view'), controller.getDocumentUrl);
+router.post('/:id/verify-document', requirePermission('students', 'approve'), controller.verifyDocument);
 
 module.exports = router;

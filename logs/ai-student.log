@@ -1,6 +1,0 @@
-[2026-07-03 21:35:08] INFO  [ai-student] Analyzing student profile | studentId="6a47c8888e8d402c7ba583ae", name="Aarav"
-[2026-07-03 21:35:08] INFO  [ai-student] Student analysis complete | provider="fallback", rating="excellent"
-[2026-07-03 21:41:05] INFO  [ai-student] Analyzing student profile | studentId="6a47c8888e8d402c7ba583ae", name="Aarav"
-[2026-07-03 21:41:05] INFO  [ai-student] Student analysis complete | provider="fallback", rating="excellent"
-[2026-07-03 21:41:48] INFO  [ai-student] Analyzing student profile | studentId="6a47c8888e8d402c7ba583ae", name="Aarav"
-[2026-07-03 21:41:48] INFO  [ai-student] Student analysis complete | provider="fallback", rating="excellent"

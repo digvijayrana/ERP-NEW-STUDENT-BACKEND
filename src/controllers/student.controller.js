@@ -1,16 +1,37 @@
 const Admission = require('../models/Admission');
+const AcademicYear = require('../models/AcademicYear');
 const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
-const { uploadDocument } = require('../services/documentStorage.service');
+const { uploadDocument, extractStorageKey, readDocument } = require('../services/documentStorage.service');
 const { nextAdmissionNumber } = require('../services/sequence.service');
-const { HTTP_STATUS, ROLES } = require('../constants');
+const { validateAdmission, buildActivityEntry } = require('../services/studentValidation.service');
+const {
+  ACTIONS,
+  auditOnCreate,
+  auditOnUpdate,
+  buildStatusChangeEntry,
+  logEntityCreate,
+  logEntityUpdate,
+  logStatusChange
+} = require('../services/activityLog.service');
+const { MODULES } = require('../constants/activityActions');
+const { countStudentsInClass } = require('./classRoom.controller');
+const { createLogger } = require('../utils/logger');
+const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
+const { sendPaginated } = require('../utils/apiResponse');
+const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+
+const STUDENT_SORT_FIELDS = ['admissionNumber', 'firstName', 'admissionDate', 'status', 'createdAt'];
+
+const log = createLogger('students');
 
 async function fileToDocument(file, type, title, folder) {
   const stored = await uploadDocument(file, folder);
   return {
     type,
     title: title || file.originalname,
+    status: 'uploaded',
     ...stored
   };
 }
@@ -31,28 +52,95 @@ exports.createAdmission = asyncHandler(async (req, res) => {
     documents.push(await fileToDocument(files.birthCertificate[0], 'birth_certificate', 'Birth certificate', 'students/birth-certificates'));
   }
   for (const file of files.otherDocuments || []) {
-    documents.push(await fileToDocument(file, 'other', file.originalname, 'students/other-documents'));
+    const docType = payload.previousSchoolDetails ? 'transfer_certificate' : 'other';
+    documents.push(await fileToDocument(file, docType, file.originalname, 'students/other-documents'));
   }
+
+  const activeYear = await AcademicYear.findOne({ $or: [{ status: 'active' }, { isActive: true }] }).sort({ startDate: -1 });
+  const academicYearId = payload.academicYear || activeYear?._id;
+  if (!academicYearId) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'No active academic year found. Please activate an academic year first.' });
+  }
+
+  if (!payload.classRoom) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Class selection is required for admission' });
+  }
+
+  const classRoom = await ClassRoom.findById(payload.classRoom);
+  if (!classRoom) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Selected class not found' });
+  }
+  if (classRoom.status === 'inactive') {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Selected class is inactive and cannot accept new admissions' });
+  }
+  if (String(classRoom.academicYear) !== String(academicYearId)) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Selected class does not belong to the active academic year' });
+  }
+
+  const enrolledCount = await countStudentsInClass(classRoom._id, academicYearId);
+  if (enrolledCount >= classRoom.capacity) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      message: `Class ${classRoom.name}-${classRoom.section} has reached maximum capacity (${classRoom.capacity})`,
+      studentCount: enrolledCount,
+      capacity: classRoom.capacity
+    });
+  }
+
+  await validateAdmission({
+    studentData: payload.student || {},
+    guardians: payload.guardians || [],
+    classRoom,
+    academicYearId,
+    rollNumber: payload.rollNumber,
+    documents
+  });
+
+  const admissionEntry = buildActivityEntry(
+    'admission',
+    `Student admitted to ${classRoom.name}-${classRoom.section}`,
+    req.user,
+    { classRoom: classRoom._id, academicYear: academicYearId }
+  );
 
   const createdStudent = await Student.create({
     ...(payload.student || {}),
     admissionNumber: await nextAdmissionNumber(),
+    admissionDate: new Date(),
+    status: 'active',
     guardians: payload.guardians || [],
     previousSchoolDetails: payload.previousSchoolDetails || undefined,
     documents,
     enrollments: [
       {
-        academicYear: payload.academicYear,
+        academicYear: academicYearId,
         classRoom: payload.classRoom,
-        rollNumber: payload.rollNumber
+        rollNumber: payload.rollNumber,
+        monthlyFee: classRoom.monthlyFee,
+        status: 'studying'
       }
-    ]
+    ],
+    activityLog: [admissionEntry],
+    ...auditOnCreate(req.user)
+  });
+
+  logEntityCreate({
+    module: MODULES.STUDENTS,
+    entityId: createdStudent._id,
+    entityLabel: createdStudent.admissionNumber,
+    action: ACTIONS.ADMISSION,
+    description: `Student admitted: ${createdStudent.firstName} ${createdStudent.lastName || ''}`.trim(),
+    user: req.user,
+    meta: {
+      admissionNumber: createdStudent.admissionNumber,
+      classRoom: classRoom._id,
+      academicYear: academicYearId
+    }
   });
 
   try {
     await Admission.create({
       student: createdStudent._id,
-      academicYear: payload.academicYear,
+      academicYear: academicYearId,
       classRoom: payload.classRoom,
       admissionType: payload.admissionType || 'new',
       previousSchool: payload.previousSchool,
@@ -63,13 +151,50 @@ exports.createAdmission = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  res.status(HTTP_STATUS.CREATED).json(createdStudent);
+  log.info('Student admission created', {
+    studentId: createdStudent._id,
+    admissionNumber: createdStudent.admissionNumber,
+    user: req.user.email
+  });
+
+  res.status(HTTP_STATUS.CREATED).json({
+    ...createdStudent.toObject(),
+    assignedClass: { name: classRoom.name, section: classRoom.section },
+    assignedAcademicYear: activeYear?.name,
+    monthlyFee: classRoom.monthlyFee
+  });
 });
 
 exports.list = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.classRoom) filter['enrollments.classRoom'] = req.query.classRoom;
+  if (req.query.academicYear) filter['enrollments.academicYear'] = req.query.academicYear;
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.section) {
+    const classIds = await ClassRoom.find({ section: req.query.section }).distinct('_id');
+    filter['enrollments.classRoom'] = filter['enrollments.classRoom']
+      ? { $in: [filter['enrollments.classRoom'], ...classIds].filter(Boolean) }
+      : { $in: classIds };
+  }
+  if (req.query.admissionFrom || req.query.admissionTo) {
+    filter.admissionDate = {};
+    if (req.query.admissionFrom) filter.admissionDate.$gte = new Date(req.query.admissionFrom);
+    if (req.query.admissionTo) filter.admissionDate.$lte = new Date(req.query.admissionTo);
+  }
+  if (req.query.search) {
+    const term = req.query.search.trim();
+    const regex = new RegExp(term, 'i');
+    filter.$or = [
+      { admissionNumber: regex },
+      { firstName: regex },
+      { lastName: regex },
+      { aadhaarNumber: term },
+      { udisePenId: term },
+      { 'guardians.name': regex },
+      { 'guardians.phone': term },
+      { 'enrollments.rollNumber': term }
+    ];
+  }
   if (req.user.role === ROLES.STUDENT) filter._id = req.user.student;
   if (req.user.role === ROLES.PARENT) {
     const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
@@ -80,11 +205,20 @@ exports.list = asyncHandler(async (req, res) => {
     filter['enrollments.classRoom'] = { $in: classIds };
   }
 
-  const students = await Student.find(filter)
-    .populate('enrollments.academicYear', 'name')
-    .populate('enrollments.classRoom', 'name section')
-    .sort({ createdAt: -1 });
-  res.json(students);
+  const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
+  const sort = parseSortQuery(req.query, STUDENT_SORT_FIELDS);
+
+  const [students, totalItems] = await Promise.all([
+    Student.find(filter)
+      .populate('enrollments.academicYear', 'name')
+      .populate('enrollments.classRoom', 'name section')
+      .sort(sort)
+      .skip(skip)
+      .limit(pageSize),
+    Student.countDocuments(filter)
+  ]);
+
+  return sendPaginated(res, students, { page, pageSize, totalItems });
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -110,15 +244,99 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const student = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+  const existing = await Student.findById(req.params.id);
+  if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const mergedData = { ...existing.toObject(), ...req.body };
+  const latestEnrollment = req.body.enrollments?.[0] || existing.enrollments?.filter((e) => e.status === 'studying').pop() || existing.enrollments?.at(-1);
+  const classRoomId = latestEnrollment?.classRoom;
+  const classRoom = classRoomId ? await ClassRoom.findById(classRoomId) : null;
+
+  await validateAdmission({
+    studentData: mergedData,
+    guardians: req.body.guardians || existing.guardians,
+    classRoom,
+    academicYearId: latestEnrollment?.academicYear,
+    rollNumber: latestEnrollment?.rollNumber,
+    documents: existing.documents,
+    excludeStudentId: existing._id,
+    skipMandatoryDocs: true
+  });
+
+  const updateEntry = buildActivityEntry('profile_update', 'Student profile updated', req.user);
+  const student = await Student.findByIdAndUpdate(
+    req.params.id,
+    { ...req.body, $push: { activityLog: updateEntry }, ...auditOnUpdate(req.user) },
+    { new: true, runValidators: true }
+  );
+
+  logEntityUpdate({
+    module: MODULES.STUDENTS,
+    entityId: student._id,
+    entityLabel: student.admissionNumber,
+    action: ACTIONS.PROFILE_UPDATE,
+    description: `Student profile updated: ${student.admissionNumber}`,
+    user: req.user
+  });
+
+  log.info('Student updated', { studentId: student._id, user: req.user.email });
+  res.json(student);
+});
+
+exports.updateStatus = asyncHandler(async (req, res) => {
+  const { status, reason } = req.body;
+  const allowed = ['active', 'inactive', 'left_school', 'passed_out', 'tc_issued'];
+  if (!allowed.includes(status)) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: `Status must be one of: ${allowed.join(', ')}` });
+  }
+
+  const existing = await Student.findById(req.params.id);
+  if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const statusEntry = buildStatusChangeEntry(existing.status, status, req.user, reason, { entityType: 'student' });
+
+  const student = await Student.findByIdAndUpdate(
+    req.params.id,
+    { status, $push: { activityLog: statusEntry }, ...auditOnUpdate(req.user) },
+    { new: true, runValidators: true }
+  );
+
+  logStatusChange({
+    module: MODULES.STUDENTS,
+    entityId: student._id,
+    entityLabel: student.admissionNumber,
+    previousStatus: existing.status,
+    newStatus: status,
+    user: req.user,
+    remarks: reason
+  });
+
+  log.info('Student status changed', { studentId: student._id, status, user: req.user.email });
   res.json(student);
 });
 
 exports.remove = asyncHandler(async (req, res) => {
-  const student = await Student.findByIdAndUpdate(req.params.id, { status: 'inactive' }, { new: true });
-  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
-  res.json({ deleted: true });
+  const existing = await Student.findById(req.params.id);
+  if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const statusEntry = buildStatusChangeEntry(existing.status, 'inactive', req.user, 'Student deactivated');
+  const student = await Student.findByIdAndUpdate(
+    req.params.id,
+    { status: 'inactive', $push: { activityLog: statusEntry }, ...auditOnUpdate(req.user) },
+    { new: true }
+  );
+
+  logStatusChange({
+    module: MODULES.STUDENTS,
+    entityId: student._id,
+    entityLabel: student.admissionNumber,
+    previousStatus: existing.status,
+    newStatus: 'inactive',
+    user: req.user,
+    remarks: 'Student deactivated'
+  });
+  log.info('Student deactivated', { studentId: student._id, user: req.user.email });
+  res.json({ deactivated: true, student });
 });
 
 exports.addDocument = asyncHandler(async (req, res) => {
@@ -126,9 +344,49 @@ exports.addDocument = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
-  student.documents.push(await fileToDocument(req.file, req.body.type || 'other', req.body.title, 'students/documents'));
+  const doc = await fileToDocument(req.file, req.body.type || 'other', req.body.title, 'students/documents');
+  student.documents.push(doc);
+  student.activityLog.push(buildActivityEntry('document_upload', `Document uploaded: ${doc.title}`, req.user, { type: doc.type }));
   await student.save();
   res.status(HTTP_STATUS.CREATED).json(student.documents.at(-1));
+});
+
+exports.replaceDocument = asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document file is required' });
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const doc = student.documents.id(req.params.documentId);
+  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  const stored = await uploadDocument(req.file, 'students/documents');
+  doc.title = req.body.title || req.file.originalname;
+  doc.fileUrl = stored.fileUrl;
+  doc.storageKey = stored.storageKey;
+  doc.storageProvider = stored.storageProvider;
+  doc.mimeType = stored.mimeType;
+  doc.size = stored.size;
+  doc.uploadedAt = new Date();
+  doc.status = 'uploaded';
+  doc.rejectReason = '';
+
+  student.activityLog.push(buildActivityEntry('document_replace', `Document replaced: ${doc.title}`, req.user, { documentId: doc._id }));
+  await student.save();
+  res.json(doc);
+});
+
+exports.deleteDocument = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  const doc = student.documents.id(req.params.documentId);
+  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  const title = doc.title;
+  doc.deleteOne();
+  student.activityLog.push(buildActivityEntry('document_delete', `Document removed: ${title}`, req.user));
+  await student.save();
+  res.json({ deleted: true });
 });
 
 exports.promote = asyncHandler(async (req, res) => {
@@ -177,4 +435,87 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
   await student.save();
 
   res.json({ message: `Document ${doc.status}`, documents: student.documents });
+});
+
+async function ensureStudentDocumentAccess(req, student) {
+  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
+    const error = new Error('Students can only access their own documents');
+    error.status = HTTP_STATUS.FORBIDDEN;
+    throw error;
+  }
+  if (req.user.role === ROLES.PARENT) {
+    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
+    if (!childIds.includes(req.params.id)) {
+      const error = new Error('Parents can only access their linked child documents');
+      error.status = HTTP_STATUS.FORBIDDEN;
+      throw error;
+    }
+  }
+  if (req.user.role === ROLES.TEACHER) {
+    const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
+    const canAccess = student.enrollments.some((enrollment) =>
+      classIds.some((id) => id.equals(enrollment.classRoom?._id || enrollment.classRoom))
+    );
+    if (!canAccess) {
+      const error = new Error('Teacher can only access assigned class student documents');
+      error.status = HTTP_STATUS.FORBIDDEN;
+      throw error;
+    }
+  }
+}
+
+exports.getDocumentUrl = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  await ensureStudentDocumentAccess(req, student);
+
+  const doc = student.documents.id(req.params.documentId);
+  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  const url = `${req.protocol}://${req.get('host')}/api/students/${req.params.id}/documents/${req.params.documentId}/file`;
+  res.json({ url, fileName: doc.title, mimeType: doc.mimeType });
+});
+
+exports.streamDocument = asyncHandler(async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+
+  await ensureStudentDocumentAccess(req, student);
+
+  const doc = student.documents.id(req.params.documentId);
+  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  const key = extractStorageKey(doc.fileUrl, doc.storageKey);
+  if (!key) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document storage key not found' });
+  }
+
+  try {
+    const { body, contentType } = await readDocument(key, doc.storageProvider);
+    const fileName = (doc.title || 'document').replace(/[^\w.\-() ]/g, '_');
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+    if (body.pipe) {
+      body.pipe(res);
+      return;
+    }
+    if (Buffer.isBuffer(body)) {
+      return res.send(body);
+    }
+    const buffer = Buffer.from(await body.transformToByteArray());
+    return res.send(buffer);
+  } catch (error) {
+    log.error('Document stream failed', {
+      studentId: req.params.id,
+      documentId: req.params.documentId,
+      key,
+      provider: doc.storageProvider,
+      error: error.message,
+      cause: error.cause?.message
+    });
+    const status = error.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
+    return res.status(status).json({ message: error.message });
+  }
 });

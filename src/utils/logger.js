@@ -66,8 +66,8 @@ class SplunkHecTransport extends Transport {
         'Content-Type': 'application/json'
       },
       body: payload
-    }).catch((err) => {
-      process.stderr.write(`[splunk-transport] Failed to send logs: ${err.message}\n`);
+    }).catch(() => {
+      // Splunk is optional; avoid noisy stderr when HEC is unreachable.
     });
   }
 
@@ -92,7 +92,7 @@ function createLogger(moduleName) {
     })
   ];
 
-  if (process.env.SPLUNK_HEC_URL && process.env.SPLUNK_HEC_TOKEN) {
+  if (process.env.SPLUNK_HEC_URL && process.env.SPLUNK_HEC_TOKEN && process.env.SPLUNK_HEC_ENABLED === 'true') {
     transports.push(new SplunkHecTransport({
       url: process.env.SPLUNK_HEC_URL,
       token: process.env.SPLUNK_HEC_TOKEN,

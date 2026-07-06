@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { auditFieldSchema } = require('../utils/auditFields');
 
 const teacherSchema = new mongoose.Schema(
   {
@@ -12,6 +13,11 @@ const teacherSchema = new mongoose.Schema(
       match: [/^\d{10}$/, 'Phone number must be exactly 10 digits']
     },
     email: { type: String, trim: true, lowercase: true },
+    aadhaarNumber: {
+      type: String,
+      trim: true,
+      match: [/^\d{12}$/, 'Aadhaar number must be exactly 12 digits']
+    },
     qualification: { type: String, trim: true },
     joiningDate: { type: Date, default: Date.now },
     baseSalary: { type: Number, required: true, min: 0 },
@@ -41,13 +47,18 @@ const teacherSchema = new mongoose.Schema(
       document: { url: String, originalName: String, uploadedAt: Date }
     }],
     documents: {
-      idProof: { url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
-      resume: { url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
-      certificates: [{ url: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String }]
-    }
+      idProof: { url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
+      resume: { url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
+      certificates: [{ url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String }]
+    },
+    ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+teacherSchema.index({ phone: 1 }, { unique: true, sparse: true });
+teacherSchema.index({ email: 1 }, { unique: true, sparse: true });
+teacherSchema.index({ aadhaarNumber: 1 }, { unique: true, sparse: true });
 
 teacherSchema.virtual('fullName').get(function fullName() {
   return [this.firstName, this.lastName].filter(Boolean).join(' ');

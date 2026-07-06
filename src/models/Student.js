@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { auditFieldSchema } = require('../utils/auditFields');
 
 function emptyToUndefined(value) {
   return value === '' ? undefined : value;
@@ -18,7 +19,7 @@ const documentSchema = new mongoose.Schema(
     mimeType: String,
     size: Number,
     uploadedAt: { type: Date, default: Date.now },
-    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    status: { type: String, enum: ['uploaded', 'pending', 'approved', 'rejected'], default: 'uploaded' },
     rejectReason: { type: String, trim: true }
   },
   { _id: true }
@@ -52,9 +53,21 @@ const enrollmentSchema = new mongoose.Schema(
     academicYear: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', required: true },
     classRoom: { type: mongoose.Schema.Types.ObjectId, ref: 'ClassRoom', required: true },
     rollNumber: String,
+    monthlyFee: { type: Number, min: 0 },
     status: { type: String, enum: ['studying', 'promoted', 'left'], default: 'studying' },
     fromDate: { type: Date, default: Date.now },
     toDate: Date
+  },
+  { _id: true }
+);
+
+const activityLogSchema = new mongoose.Schema(
+  {
+    action: { type: String, required: true },
+    description: { type: String, required: true },
+    performedBy: String,
+    performedAt: { type: Date, default: Date.now },
+    meta: mongoose.Schema.Types.Mixed
   },
   { _id: true }
 );
@@ -66,15 +79,27 @@ const studentSchema = new mongoose.Schema(
     lastName: { type: String, trim: true },
     gender: { type: String, enum: ['male', 'female', 'other'], required: true },
     dateOfBirth: { type: Date, required: true },
-    bloodGroup: String,
+    bloodGroup: { type: String, trim: true },
+    category: { type: String, trim: true },
+    nationality: { type: String, trim: true, default: 'Indian' },
+    motherName: { type: String, trim: true },
     aadhaarNumber: {
       type: String,
       trim: true,
       set: emptyToUndefined,
       match: [/^\d{12}$/, 'Aadhaar number must be exactly 12 digits']
     },
+    udisePenId: {
+      type: String,
+      trim: true,
+      set: emptyToUndefined
+    },
     admissionDate: { type: Date, default: Date.now },
-    status: { type: String, enum: ['active', 'inactive', 'alumni'], default: 'active' },
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'left_school', 'passed_out', 'tc_issued', 'alumni'],
+      default: 'active'
+    },
     address: {
       line1: { type: String, required: true },
       line2: String,
@@ -84,18 +109,27 @@ const studentSchema = new mongoose.Schema(
     },
     previousSchoolDetails: {
       schoolName: { type: String, trim: true },
+      board: { type: String, trim: true },
+      percentage: Number,
+      rollNumber: { type: String, trim: true },
       address: { type: String, trim: true },
       lastClass: { type: String, trim: true },
       yearOfPassing: Number,
       reasonForLeaving: { type: String, trim: true },
-      tcNumber: { type: String, trim: true }
+      tcNumber: { type: String, trim: true },
+      tcDate: Date
     },
     guardians: [guardianSchema],
     documents: [documentSchema],
-    enrollments: [enrollmentSchema]
+    enrollments: [enrollmentSchema],
+    activityLog: [activityLogSchema],
+    ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+studentSchema.index({ aadhaarNumber: 1 }, { unique: true, sparse: true });
+studentSchema.index({ udisePenId: 1 }, { unique: true, sparse: true });
 
 studentSchema.virtual('fullName').get(function fullName() {
   return [this.firstName, this.lastName].filter(Boolean).join(' ');

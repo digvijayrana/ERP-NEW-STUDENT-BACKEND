@@ -10,6 +10,37 @@ const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 
 const log = createLogger('students');
 const PERCENTAGE_MULTIPLIER = 100;
+const MANDATORY_DOC_TYPES = ['photo', 'birth_certificate'];
+
+function computeProfileCompletion(student, latestEnrollment) {
+  const checks = [
+    !!student.firstName,
+    !!student.lastName,
+    !!student.dateOfBirth,
+    !!student.gender,
+    !!student.address?.line1,
+    !!student.address?.city,
+    !!student.address?.state,
+    !!student.address?.pincode,
+    !!(student.guardians?.length && student.guardians[0]?.phone),
+    !!(student.aadhaarNumber || student.guardians?.[0]?.phone),
+    !!student.documents?.some((d) => d.type === 'photo'),
+    !!student.documents?.some((d) => d.type === 'birth_certificate'),
+    !!latestEnrollment?.classRoom,
+    !!latestEnrollment?.rollNumber
+  ];
+  const completed = checks.filter(Boolean).length;
+  return Math.round((completed / checks.length) * PERCENTAGE_MULTIPLIER);
+}
+
+function mandatoryDocumentStatus(documents = []) {
+  const uploaded = MANDATORY_DOC_TYPES.filter((type) => documents.some((d) => d.type === type && d.fileUrl));
+  return {
+    photo: documents.some((d) => d.type === 'photo' && d.fileUrl) ? 'uploaded' : 'pending',
+    birthCertificate: documents.some((d) => d.type === 'birth_certificate' && d.fileUrl) ? 'uploaded' : 'pending',
+    overall: uploaded.length === MANDATORY_DOC_TYPES.length ? 'uploaded' : 'pending'
+  };
+}
 
 async function assertStudentAccess(req, studentId) {
   if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== studentId) {
@@ -34,7 +65,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
   if (accessError) return res.status(accessError.status).json({ message: accessError.error });
 
   const student = await Student.findById(req.params.id)
-    .populate('enrollments.academicYear', 'name isActive')
+    .populate('enrollments.academicYear', 'name isActive status')
     .populate('enrollments.classRoom', 'name section monthlyFee classTeacher')
     .populate('enrollments.classRoom.classTeacher', 'firstName lastName phone email');
 
@@ -100,6 +131,20 @@ exports.getProfile = asyncHandler(async (req, res) => {
   const feeStatus = totalFeeDue <= 0 ? 'paid' : feeInvoices.some((i) => i.status === 'partial') ? 'partial' : 'unpaid';
 
   const photoDoc = student.documents?.find((d) => d.type === 'photo');
+  const docStatus = mandatoryDocumentStatus(student.documents);
+
+  const activityTimeline = (student.activityLog || [])
+    .slice()
+    .sort((a, b) => new Date(b.performedAt) - new Date(a.performedAt))
+    .map((entry) => ({
+      action: entry.action,
+      description: entry.description,
+      performedBy: entry.performedBy,
+      performedAt: entry.performedAt,
+      previousStatus: entry.meta?.previousStatus,
+      newStatus: entry.meta?.newStatus,
+      remarks: entry.meta?.remarks
+    }));
 
   const profilePayload = {
     student: {
@@ -109,7 +154,17 @@ exports.getProfile = asyncHandler(async (req, res) => {
       lastName: student.lastName,
       gender: student.gender,
       dateOfBirth: student.dateOfBirth,
+      bloodGroup: student.bloodGroup,
+      category: student.category,
+      nationality: student.nationality,
+      motherName: student.motherName,
+      aadhaarNumber: student.aadhaarNumber,
+      udisePenId: student.udisePenId,
       status: student.status,
+      admissionDate: student.admissionDate,
+      updatedAt: student.updatedAt,
+      createdBy: student.createdBy,
+      updatedBy: student.updatedBy,
       address: student.address,
       guardians: student.guardians,
       photoUrl: photoDoc?.fileUrl || null
@@ -122,8 +177,23 @@ exports.getProfile = asyncHandler(async (req, res) => {
       academicYear: latestEnrollment?.academicYear,
       rollNumber: latestEnrollment?.rollNumber || '—',
       classTeacher: latestEnrollment?.classRoom?.classTeacher || null,
-      classRank: null
+      classRank: null,
+      admissionDate: student.admissionDate,
+      lastUpdated: student.updatedAt
     },
+    documents: {
+      items: (student.documents || []).map((d) => ({
+        _id: d._id,
+        type: d.type,
+        title: d.title,
+        status: d.fileUrl ? 'uploaded' : 'pending',
+        verificationStatus: d.status,
+        uploadedAt: d.uploadedAt
+      })),
+      mandatoryStatus: docStatus
+    },
+    profileCompletion: computeProfileCompletion(student, latestEnrollment),
+    activityTimeline,
     attendance: {
       percentage: attendancePercentage,
       present,
