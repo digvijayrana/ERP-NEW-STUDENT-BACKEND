@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 function emptyToUndefined(value) {
   return value === '' ? undefined : value;
@@ -142,13 +143,21 @@ const studentSchema = new mongoose.Schema(
       driverMobile: { type: String, trim: true }
     },
     activityLog: [activityLogSchema],
+    ...softDeleteFieldSchema,
     ...auditFieldSchema
   },
   { timestamps: true }
 );
 
+applySoftDeleteMiddleware(studentSchema);
+
 studentSchema.index({ aadhaarNumber: 1 }, { unique: true, sparse: true });
 studentSchema.index({ udisePenId: 1 }, { unique: true, sparse: true });
+studentSchema.index({ status: 1, createdAt: -1 });
+studentSchema.index({ admissionNumber: 1 });
+studentSchema.index({ firstName: 1, lastName: 1 });
+studentSchema.index({ 'enrollments.academicYear': 1, 'enrollments.classRoom': 1, status: 1 });
+studentSchema.index({ 'enrollments.classRoom': 1, status: 1 });
 
 studentSchema.virtual('fullName').get(function fullName() {
   return [this.firstName, this.lastName].filter(Boolean).join(' ');

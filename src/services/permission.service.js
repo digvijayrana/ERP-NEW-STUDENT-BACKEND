@@ -7,6 +7,15 @@ const roleCache = new Map();
 const CACHE_TTL_MS = 60_000;
 let cacheExpiresAt = 0;
 
+const ROLE_ALIASES = {
+  reception: 'receptionist'
+};
+
+function resolveRoleSlug(roleSlug) {
+  if (DEFAULT_ROLE_PERMISSIONS[roleSlug] || roleCache.has(roleSlug)) return roleSlug;
+  return ROLE_ALIASES[roleSlug] || roleSlug;
+}
+
 function normalizePermissions(raw = {}) {
   const normalized = {};
   const source = raw instanceof Map ? Object.fromEntries(raw.entries()) : raw;
@@ -58,7 +67,22 @@ async function getPermissionsForRole(roleSlug) {
   if (roleSlug === 'super_admin') {
     return normalizePermissions(DEFAULT_ROLE_PERMISSIONS.super_admin.permissions);
   }
-  return roleCache.get(roleSlug) || normalizePermissions({});
+  const resolved = resolveRoleSlug(roleSlug);
+  return roleCache.get(resolved) || roleCache.get(roleSlug) || normalizePermissions({});
+}
+
+async function assertAssignableRole(roleSlug) {
+  if (roleSlug === 'super_admin') return true;
+  await loadRoleCache();
+  const resolved = resolveRoleSlug(roleSlug);
+  if (roleCache.has(resolved) || roleCache.has(roleSlug)) return true;
+  const role = await Role.findOne({ slug: roleSlug }).lean();
+  if (!role) {
+    const error = new Error(`Unknown role: ${roleSlug}`);
+    error.status = 400;
+    throw error;
+  }
+  return true;
 }
 
 function hasPermission(permissions, module, action) {
@@ -68,6 +92,7 @@ function hasPermission(permissions, module, action) {
 exports.ensureDefaultRoles = ensureDefaultRoles;
 exports.invalidateRoleCache = invalidateCache;
 exports.getPermissionsForRole = getPermissionsForRole;
+exports.assertAssignableRole = assertAssignableRole;
 exports.hasPermission = hasPermission;
 exports.normalizePermissions = normalizePermissions;
 exports.MODULES = MODULES;

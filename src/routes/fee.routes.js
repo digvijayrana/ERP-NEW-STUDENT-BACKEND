@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const controller = require('../controllers/fee.controller');
-const { requirePermission, requireSuperAdmin } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 
 router.post('/demands/generate', requirePermission('fees', 'create'), controller.generateDemands);
 router.post('/invoices', requirePermission('fees', 'create'), controller.createInvoice);
@@ -11,7 +11,7 @@ router.get('/invoices/:id', requirePermission('fees', 'view'), controller.getInv
 router.patch('/invoices/:id', requirePermission('fees', 'edit'), controller.updateInvoice);
 router.post('/invoices/:id/payments', requirePermission('fees', 'edit'), controller.addPayment);
 router.post('/invoices/:id/payments/:paymentId/void', requirePermission('fees', 'edit'), controller.voidPayment);
-router.post('/invoices/:id/payments/:paymentId/unlock', requireSuperAdmin, controller.unlockPayment);
+router.post('/invoices/:id/payments/:paymentId/unlock', requirePermission('fees', 'unlock'), controller.unlockPayment);
 router.get('/history', requirePermission('fees', 'view'), controller.feeHistory);
 router.get('/invoices/:id/pdf', requirePermission('fees', 'view'), controller.downloadInvoice);
 router.get('/invoices/:id/receipts/:paymentId/pdf', requirePermission('fees', 'view'), controller.downloadReceipt);

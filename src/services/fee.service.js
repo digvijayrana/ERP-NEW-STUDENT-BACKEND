@@ -6,6 +6,9 @@ const { nextInvoiceNumber, nextReceiptNumber } = require('./sequence.service');
 const { resolveBusFee } = require('./bus.service');
 const { ensureAcademicYearEditable, assertLockedReceiptEditable } = require('./integrity.service');
 const { HTTP_STATUS } = require('../constants');
+const { withTransaction } = require('../utils/withTransaction');
+const { invalidateNamespace } = require('./cache.service');
+const { getPolicySection } = require('./governanceConfig.service');
 function demandPeriod(year, month) {
   return { feeYear: year, feeMonth: month };
 }
@@ -209,6 +212,8 @@ async function collectPayment(invoice, paymentData, user) {
   }
 
   const receiptNumber = await nextReceiptNumber();
+  const feePolicies = await getPolicySection('feePolicies');
+  const lockReceipt = feePolicies.lockReceiptOnPayment !== false;
   invoice.payments.push({
     receiptNumber,
     amount,
@@ -217,7 +222,7 @@ async function collectPayment(invoice, paymentData, user) {
     remarks: paymentData.remarks,
     paidAt: paymentData.paidAt || new Date(),
     status: 'active',
-    locked: true,
+    locked: lockReceipt,
     discountApplied: invoice.discount || 0,
     fineApplied: invoice.fine || 0
   });
@@ -226,29 +231,33 @@ async function collectPayment(invoice, paymentData, user) {
     invoice.updatedBy = user._id || user.id;
   }
 
-  await invoice.save();
+  return withTransaction(async (session) => {
+    await invoice.save({ session });
 
-  const student = await Student.findById(invoice.student);
-  if (student) {
+    const student = await Student.findById(invoice.student).session(session);
     const payment = invoice.payments[invoice.payments.length - 1];
-    student.activityLog = student.activityLog || [];
-    student.activityLog.push({
-      action: 'fee_payment',
-      description: `Fee payment received: ${payment.receiptNumber} — ₹${payment.amount}`,
-      performedBy: user?.email || user?.id || 'accounts',
-      performedAt: payment.paidAt || new Date(),
-      meta: {
-        receiptNumber: payment.receiptNumber,
-        amount: payment.amount,
-        invoiceNumber: invoice.invoiceNumber,
-        mode: payment.mode
-      }
-    });
-    await student.save();
-    return { invoice, payment };
-  }
+    if (student) {
+      student.activityLog = student.activityLog || [];
+      student.activityLog.push({
+        action: 'fee_payment',
+        description: `Fee payment received: ${payment.receiptNumber} — ₹${payment.amount}`,
+        performedBy: user?.email || user?.id || 'accounts',
+        performedAt: payment.paidAt || new Date(),
+        meta: {
+          receiptNumber: payment.receiptNumber,
+          amount: payment.amount,
+          invoiceNumber: invoice.invoiceNumber,
+          mode: payment.mode
+        }
+      });
+      await student.save({ session });
+    }
 
-  return { invoice, payment: invoice.payments[invoice.payments.length - 1] };
+    return { invoice, payment };
+  }).then((result) => {
+    invalidateNamespace('dashboard');
+    return result;
+  });
 }
 
 async function voidPayment(invoice, paymentId, reason, user) {
@@ -288,6 +297,143 @@ async function unlockPayment(invoice, paymentId) {
   invoice.locked = false;
   await invoice.save();
   return { invoice, payment };
+}
+
+async function listFeeHistoryPaginated({ filter = {}, search, paymentStatus, skip = 0, limit = 10 } = {}) {
+  const match = { ...filter };
+  const pipeline = [
+    { $match: match },
+    {
+      $lookup: {
+        from: 'students',
+        localField: 'student',
+        foreignField: '_id',
+        as: 'studentDoc'
+      }
+    },
+    { $unwind: { path: '$studentDoc', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'classrooms',
+        localField: 'classRoom',
+        foreignField: '_id',
+        as: 'classDoc'
+      }
+    },
+    { $unwind: { path: '$classDoc', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'academicyears',
+        localField: 'academicYear',
+        foreignField: '_id',
+        as: 'yearDoc'
+      }
+    },
+    { $unwind: { path: '$yearDoc', preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        invoiceId: '$_id',
+        invoiceNumber: 1,
+        feeMonth: 1,
+        feeYear: 1,
+        tuitionFee: 1,
+        busFee: 1,
+        payments: { $ifNull: ['$payments', []] },
+        student: {
+          _id: '$studentDoc._id',
+          firstName: '$studentDoc.firstName',
+          lastName: '$studentDoc.lastName',
+          admissionNumber: '$studentDoc.admissionNumber'
+        },
+        classRoom: { _id: '$classDoc._id', name: '$classDoc.name', section: '$classDoc.section' },
+        academicYear: { _id: '$yearDoc._id', name: '$yearDoc.name' },
+        balanceAmount: {
+          $max: [
+            {
+              $subtract: [
+                {
+                  $add: [
+                    { $ifNull: ['$tuitionFee', 0] },
+                    { $ifNull: ['$busFee', 0] },
+                    { $ifNull: ['$otherCharges', 0] },
+                    { $ifNull: ['$previousPending', 0] },
+                    { $ifNull: ['$fine', 0] }
+                  ]
+                },
+                { $ifNull: ['$discount', 0] }
+              ]
+            },
+            0
+          ]
+        },
+        status: 1,
+        locked: 1
+      }
+    },
+    { $unwind: { path: '$payments', preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        invoiceId: 1,
+        paymentId: '$payments._id',
+        invoiceNumber: 1,
+        receiptNumber: '$payments.receiptNumber',
+        student: 1,
+        academicYear: 1,
+        classRoom: 1,
+        feeMonth: 1,
+        feeYear: 1,
+        tuitionFee: 1,
+        busFee: 1,
+        paidAmount: { $ifNull: ['$payments.amount', 0] },
+        pendingAmount: '$balanceAmount',
+        paymentDate: '$payments.paidAt',
+        paymentStatus: {
+          $cond: [
+            { $eq: ['$payments.status', 'void'] },
+            'void',
+            '$status'
+          ]
+        },
+        mode: '$payments.mode',
+        locked: { $ifNull: ['$payments.locked', '$locked'] }
+      }
+    }
+  ];
+
+  if (paymentStatus) {
+    pipeline.push({ $match: { paymentStatus } });
+  }
+  if (search) {
+    const term = search.trim();
+    pipeline.push({
+      $match: {
+        $or: [
+          { receiptNumber: new RegExp(term, 'i') },
+          { invoiceNumber: new RegExp(term, 'i') },
+          { 'student.firstName': new RegExp(term, 'i') },
+          { 'student.lastName': new RegExp(term, 'i') },
+          { 'student.admissionNumber': new RegExp(term, 'i') }
+        ]
+      }
+    });
+  }
+
+  pipeline.push({
+    $facet: {
+      rows: [
+        { $sort: { paymentDate: -1, feeYear: -1, feeMonth: -1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ],
+      total: [{ $count: 'count' }]
+    }
+  });
+
+  const [result] = await FeeInvoice.aggregate(pipeline);
+  return {
+    rows: result?.rows || [],
+    totalItems: result?.total?.[0]?.count || 0
+  };
 }
 
 async function listFeeHistory(filter = {}) {
@@ -359,5 +505,6 @@ module.exports = {
   voidPayment,
   unlockPayment,
   listFeeHistory,
+  listFeeHistoryPaginated,
   ensureNoDuplicateDemand
 };

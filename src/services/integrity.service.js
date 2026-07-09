@@ -70,7 +70,8 @@ async function ensureAcademicYearEditable(academicYearId) {
   }
   const status = year.status || (year.isActive ? 'active' : 'draft');
   if (status === 'closed') {
-    throw integrityError('Classes linked to a closed academic year are read-only', INTEGRITY_CODE);
+    const archived = year.archivedAt ? 'archived and ' : '';
+    throw integrityError(`Classes linked to an ${archived}closed academic year are read-only`, INTEGRITY_CODE);
   }
   return year;
 }

@@ -2,7 +2,9 @@ const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const Timetable = require('../models/Timetable');
 const asyncHandler = require('../middleware/asyncHandler');
-const { HTTP_STATUS, ROLES } = require('../constants');
+const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
+const { sendPaginated } = require('../utils/apiResponse');
+const { parsePaginationQuery } = require('../utils/pagination');
 
 async function readableClassFilter(req) {
   if (req.user.role === ROLES.ADMIN) return {};
@@ -22,14 +24,32 @@ async function readableClassFilter(req) {
   return current ? { classRoom: current.classRoom } : { classRoom: null };
 }
 
-exports.list = asyncHandler(async (req, res) => {
-  const filter = await readableClassFilter(req);
-  if (req.query.classRoom && req.user.role === ROLES.ADMIN) filter.classRoom = req.query.classRoom;
-  const rows = await Timetable.find(filter)
+function timetableQuery(filter) {
+  return Timetable.find(filter)
     .populate('classRoom', 'name section')
     .populate('periods.teacher', 'firstName lastName employeeCode')
     .sort({ dayOfWeek: 1 });
-  res.json(rows);
+}
+
+exports.list = asyncHandler(async (req, res) => {
+  const filter = await readableClassFilter(req);
+  if (req.query.classRoom && req.user.role === ROLES.ADMIN) filter.classRoom = req.query.classRoom;
+  if (req.query.search) {
+    const term = new RegExp(req.query.search.trim(), 'i');
+    filter.$or = [{ dayOfWeek: term }];
+  }
+
+  if (!req.query.page && !req.query.pageSize) {
+    const rows = await timetableQuery(filter);
+    return res.json(rows);
+  }
+
+  const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
+  const [rows, totalItems] = await Promise.all([
+    timetableQuery(filter).skip(skip).limit(pageSize),
+    Timetable.countDocuments(filter)
+  ]);
+  return sendPaginated(res, rows, { page, pageSize, totalItems });
 });
 
 exports.upsert = asyncHandler(async (req, res) => {

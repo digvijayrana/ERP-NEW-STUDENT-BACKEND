@@ -11,6 +11,7 @@ const {
   unlockPayroll
 } = require('../services/payroll.service');
 const { logEntityUpdate } = require('../services/activityLog.service');
+const { assertReversalAllowed, logUnlock } = require('../services/businessRules.service');
 const { HTTP_STATUS, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
@@ -122,7 +123,21 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.unlock = asyncHandler(async (req, res) => {
+  assertReversalAllowed('payroll_unlock', req.user, req.permissions);
+  const existing = await Payroll.findById(req.params.id);
+  if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Payroll record not found' });
+  const previousValue = { status: existing.status, locked: existing.locked };
   const payroll = await unlockPayroll(req.params.id, req.user);
+
+  logUnlock({
+    module: PAYROLL_MODULE,
+    entityId: payroll._id,
+    entityLabel: `${payroll.month}/${payroll.year}`,
+    user: req.user,
+    req,
+    previousValue,
+    updatedValue: { status: payroll.status, locked: payroll.locked }
+  });
 
   logPayrollActivity({
     action: 'payroll_unlock',

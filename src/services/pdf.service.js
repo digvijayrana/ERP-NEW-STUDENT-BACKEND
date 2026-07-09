@@ -31,14 +31,19 @@ const RIGHT = PAGE_W - M;
 const MID = LEFT + W / 2;
 
 function school() {
-  return {
-    name: process.env.SCHOOL_NAME || 'Student ERP School',
-    address: process.env.SCHOOL_ADDRESS || '123 Education Street, City - 000000',
-    phone: process.env.SCHOOL_PHONE || '',
-    email: process.env.SCHOOL_EMAIL || '',
-    website: process.env.SCHOOL_WEBSITE || '',
-    affiliation: process.env.SCHOOL_AFFILIATION || ''
-  };
+  try {
+    const { getCachedSchoolBranding } = require('./governanceConfig.service');
+    return getCachedSchoolBranding();
+  } catch {
+    return {
+      name: process.env.SCHOOL_NAME || 'Student ERP School',
+      address: process.env.SCHOOL_ADDRESS || '123 Education Street, City - 000000',
+      phone: process.env.SCHOOL_PHONE || '',
+      email: process.env.SCHOOL_EMAIL || '',
+      website: process.env.SCHOOL_WEBSITE || '',
+      affiliation: process.env.SCHOOL_AFFILIATION || ''
+    };
+  }
 }
 
 function pipePdf(res, filename, build) {

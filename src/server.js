@@ -3,6 +3,7 @@ const connectDb = require('./config/db');
 const { createLogger } = require('./utils/logger');
 const { checkStorageHealth, getStorageInfo } = require('./services/documentStorage.service');
 const { autoGenerateCurrentMonthDemands } = require('./services/fee.service');
+const { ensureWorker } = require('./services/jobQueue.service');
 const { DEFAULTS, FALLBACK_PORT_RETRIES } = require('./constants');
 
 const log = createLogger('server');
@@ -12,6 +13,7 @@ const host = process.env.HOST || DEFAULTS.HOST;
 async function startServer(portToUse) {
   try {
     await connectDb();
+    ensureWorker();
 
     const storageInfo = getStorageInfo();
     const storageHealth = await checkStorageHealth();
@@ -62,10 +64,27 @@ async function startServer(portToUse) {
 }
 
 process.on('unhandledRejection', (reason) => {
+  const { recordException } = require('./services/errorMonitoring.service');
+  recordException({
+    type: 'unhandled_exception',
+    message: String(reason),
+    status: 500,
+    path: 'process',
+    method: 'SYSTEM'
+  });
   log.error('Unhandled promise rejection', { reason: String(reason) });
 });
 
 process.on('uncaughtException', (error) => {
+  const { recordException } = require('./services/errorMonitoring.service');
+  recordException({
+    type: 'unhandled_exception',
+    message: error.message,
+    status: 500,
+    path: 'process',
+    method: 'SYSTEM',
+    stack: error.stack
+  });
   log.error('Uncaught exception', { error: error.message, stack: error.stack });
   process.exit(1);
 });

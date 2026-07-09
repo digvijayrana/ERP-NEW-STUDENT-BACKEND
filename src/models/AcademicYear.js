@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 const academicYearSchema = new mongoose.Schema(
   {
@@ -9,10 +10,14 @@ const academicYearSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: false },
     status: { type: String, enum: ['draft', 'active', 'closed'], default: 'draft' },
     closedAt: Date,
+    archivedAt: Date,
+    ...softDeleteFieldSchema,
     ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+applySoftDeleteMiddleware(academicYearSchema);
 
 academicYearSchema.pre('save', function syncActiveFlag() {
   this.isActive = this.status === 'active';

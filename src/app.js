@@ -48,6 +48,8 @@ app.use(cors({
 }));
 app.use(express.json({ limit: DEFAULTS.BODY_SIZE_LIMIT }));
 app.use(express.urlencoded({ extended: true }));
+const { masterRecordGuard } = require('./middleware/masterRecordGuard');
+app.use(masterRecordGuard);
 app.use(metricsMiddleware);
 app.use(requestLogger);
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {

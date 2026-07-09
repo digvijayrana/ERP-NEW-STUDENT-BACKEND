@@ -150,7 +150,13 @@ exports.lockRegister = asyncHandler(async (req, res) => {
 
 exports.unlockRegister = asyncHandler(async (req, res) => {
   const { academicYear, classRoom, date } = req.body;
-  const register = await unlockRegister({ academicYearId: academicYear, classRoomId: classRoom, date, user: req.user });
+  const register = await unlockRegister({
+    academicYearId: academicYear,
+    classRoomId: classRoom,
+    date,
+    user: req.user,
+    permissions: req.permissions
+  });
 
   logAttendanceActivity({
     action: 'attendance_unlock',

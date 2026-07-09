@@ -10,7 +10,8 @@ module.exports = {
     TRANSPORT: 'transport',
     ATTENDANCE: 'attendance',
     PAYROLL: 'payroll',
-    REPORTS: 'reports'
+    REPORTS: 'reports',
+    GOVERNANCE: 'governance'
   },
 
   ACTIONS: {
@@ -30,9 +31,19 @@ module.exports = {
     DOCUMENT_UPLOAD: 'document_upload',
     DOCUMENT_REPLACE: 'document_replace',
     DOCUMENT_DELETE: 'document_delete',
+    DOCUMENT_ACCESS: 'document_access',
+    LOGIN_SUCCESS: 'login_success',
+    LOGIN_FAILED: 'login_failed',
+    LOGIN_BLOCKED: 'login_blocked_locked',
+    LOGOUT: 'logout',
+    PASSWORD_CHANGED: 'password_changed',
+    ACCOUNT_UNLOCKED: 'account_unlocked',
+    ACCOUNT_LOCKED: 'account_locked',
     LOCK: 'lock',
     UNLOCK: 'unlock',
     RECORD_LOCK: 'record_lock',
-    RECORD_UNLOCK: 'record_unlock'
+    RECORD_UNLOCK: 'record_unlock',
+    CONFIG_CHANGE: 'config_change',
+    DATA_QUALITY_WARNING: 'data_quality_warning'
   }
 };

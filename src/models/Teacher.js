@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 const salaryHistorySchema = new mongoose.Schema(
   {
@@ -63,10 +64,13 @@ const teacherSchema = new mongoose.Schema(
       resume: { url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
       certificates: [{ url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String }]
     },
+    ...softDeleteFieldSchema,
     ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+applySoftDeleteMiddleware(teacherSchema);
 
 teacherSchema.index({ phone: 1 }, { unique: true, sparse: true });
 teacherSchema.index({ email: 1 }, { unique: true, sparse: true });

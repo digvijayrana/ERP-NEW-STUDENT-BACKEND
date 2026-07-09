@@ -14,6 +14,11 @@ const activitySchema = new mongoose.Schema(
       role: String
     },
     performedAt: { type: Date, default: Date.now, index: true },
+    ipAddress: { type: String, trim: true },
+    userAgent: { type: String, trim: true },
+    previousValue: mongoose.Schema.Types.Mixed,
+    updatedValue: mongoose.Schema.Types.Mixed,
+    remarks: { type: String, trim: true },
     meta: mongoose.Schema.Types.Mixed
   },
   { timestamps: false, versionKey: false }

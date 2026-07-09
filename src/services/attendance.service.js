@@ -5,6 +5,9 @@ const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const { HTTP_STATUS, ROLES } = require('../constants');
 const { ensureAcademicYearEditable } = require('./integrity.service');
+const { getPermissionsForRole } = require('./permission.service');
+const { canUnlock } = require('./scope.service');
+const { getPolicySection } = require('./governanceConfig.service');
 const PRESENT_STATUSES = new Set(['present', 'late', 'half_day']);
 
 function startOfDay(date) {
@@ -270,7 +273,8 @@ async function lockRegister({ academicYearId, classRoomId, date, user }) {
     error.status = HTTP_STATUS.BAD_REQUEST;
     throw error;
   }
-  if (register.workflowStatus !== 'submitted') {
+  const rules = await getPolicySection('attendanceRules');
+  if (rules.requireRegisterSubmission !== false && register.workflowStatus !== 'submitted') {
     const error = new Error('Attendance must be submitted before it can be locked');
     error.status = HTTP_STATUS.BAD_REQUEST;
     throw error;
@@ -284,9 +288,10 @@ async function lockRegister({ academicYearId, classRoomId, date, user }) {
   return register;
 }
 
-async function unlockRegister({ academicYearId, classRoomId, date, user }) {
-  if (user.role !== ROLES.ADMIN && user.role !== ROLES.SUPER_ADMIN) {
-    const error = new Error('Only administrators can unlock attendance');
+async function unlockRegister({ academicYearId, classRoomId, date, user, permissions }) {
+  const effectivePermissions = permissions || await getPermissionsForRole(user.role);
+  if (!canUnlock(user, effectivePermissions, 'attendance')) {
+    const error = new Error('You do not have permission to unlock attendance');
     error.status = HTTP_STATUS.FORBIDDEN;
     throw error;
   }
@@ -338,14 +343,93 @@ async function buildReport(reportType, filters = {}) {
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59, 999);
     match.date = { $gte: start, $lte: end };
+  } else if (filters.year && reportType === 'yearly') {
+    const year = Number(filters.year);
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31, 23, 59, 59, 999);
+    match.date = { $gte: start, $lte: end };
   }
 
-  const records = await Attendance.find(match)
+  let records = await Attendance.find(match)
     .populate('student', 'firstName lastName admissionNumber')
     .populate('classRoom', 'name section')
     .populate('academicYear', 'name')
     .sort({ date: -1 })
     .lean();
+
+  if (filters.section) {
+    records = records.filter((row) => row.classRoom?.section === filters.section);
+  }
+
+  if (reportType === 'yearly') {
+    const grouped = new Map();
+    for (const row of records) {
+      const d = new Date(row.date);
+      const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+      const bucket = grouped.get(key) || {
+        month: `${d.getMonth() + 1}/${d.getFullYear()}`,
+        present: 0,
+        absent: 0,
+        leave: 0,
+        total: 0
+      };
+      bucket.total += 1;
+      if (PRESENT_STATUSES.has(row.status)) bucket.present += 1;
+      else if (row.status === 'absent') bucket.absent += 1;
+      else if (row.status === 'leave') bucket.leave += 1;
+      grouped.set(key, bucket);
+    }
+    return [...grouped.values()].map((row) => ({
+      ...row,
+      percentage: row.present + row.absent + row.leave
+        ? Math.round((row.present / (row.present + row.absent + row.leave)) * 100)
+        : 100
+    }));
+  }
+
+  if (reportType === 'teacher-wise') {
+    const classes = await ClassRoom.find({
+      ...(filters.academicYear ? { academicYear: filters.academicYear } : {}),
+      ...(filters.teacher ? { classTeacher: filters.teacher } : {}),
+      status: 'active'
+    }).populate('classTeacher', 'firstName lastName employeeCode').lean();
+
+    const classMap = Object.fromEntries(classes.map((room) => [String(room._id), room]));
+    const grouped = new Map();
+    for (const row of records) {
+      const classId = String(row.classRoom?._id || row.classRoom);
+      const room = classMap[classId];
+      if (!room) continue;
+      const teacherId = String(room.classTeacher?._id || room.classTeacher || 'unassigned');
+      const bucket = grouped.get(teacherId) || {
+        teacherName: room.classTeacher ? teacherLabel(room.classTeacher) : 'Unassigned',
+        employeeCode: room.classTeacher?.employeeCode || '—',
+        classes: new Set(),
+        present: 0,
+        absent: 0,
+        leave: 0,
+        total: 0
+      };
+      bucket.classes.add(classLabel(room));
+      bucket.total += 1;
+      if (PRESENT_STATUSES.has(row.status)) bucket.present += 1;
+      else if (row.status === 'absent') bucket.absent += 1;
+      else if (row.status === 'leave') bucket.leave += 1;
+      grouped.set(teacherId, bucket);
+    }
+    return [...grouped.values()].map((row) => ({
+      teacherName: row.teacherName,
+      employeeCode: row.employeeCode,
+      classes: [...row.classes].join(', '),
+      present: row.present,
+      absent: row.absent,
+      leave: row.leave,
+      total: row.total,
+      percentage: row.present + row.absent + row.leave
+        ? Math.round((row.present / (row.present + row.absent + row.leave)) * 100)
+        : 100
+    }));
+  }
 
   if (reportType === 'daily') {
     return records.map((row) => ({
@@ -458,14 +542,19 @@ async function buildReport(reportType, filters = {}) {
   throw error;
 }
 
-function studentLabel(student) {
-  if (!student) return '';
-  return [student.firstName, student.lastName].filter(Boolean).join(' ');
-}
-
 function classLabel(classRoom) {
   if (!classRoom) return '';
   return `${classRoom.name || ''}-${classRoom.section || ''}`.replace(/^-|-$/g, '') || '—';
+}
+
+function teacherLabel(teacher) {
+  if (!teacher) return '';
+  return [teacher.firstName, teacher.lastName].filter(Boolean).join(' ');
+}
+
+function studentLabel(student) {
+  if (!student) return '';
+  return [student.firstName, student.lastName].filter(Boolean).join(' ');
 }
 
 module.exports = {

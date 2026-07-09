@@ -34,9 +34,12 @@ module.exports = {
   ROLES: {
     SUPER_ADMIN: 'super_admin',
     ADMIN: 'admin',
+    PRINCIPAL: 'principal',
     TEACHER: 'teacher',
-    RECEPTION: 'reception',
     ACCOUNTANT: 'accountant',
+    TRANSPORT_MANAGER: 'transport_manager',
+    RECEPTION: 'reception',
+    RECEPTIONIST: 'receptionist',
     STUDENT: 'student',
     PARENT: 'parent'
   },

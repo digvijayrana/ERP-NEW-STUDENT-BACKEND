@@ -11,6 +11,12 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { ACTIONS } = require('../constants/activityActions');
 const { ROLES } = require('../constants');
+const { buildManagementInsights } = require('../services/aiInsightsEngine.service');
+const { buildDashboardTrends } = require('../services/reportAnalytics.service');
+const { buildSystemHealth } = require('../services/systemHealth.service');
+const { getPermissionsForRole } = require('../services/permission.service');
+const { getOrSet } = require('../services/cache.service');
+const { CACHE_TTL_MS } = require('../config/performance.config');
 
 const log = createLogger('dashboard');
 const MANDATORY_DOC_TYPES = ['photo', 'birth_certificate'];
@@ -257,7 +263,7 @@ async function buildOperationalAnalytics(activeYear) {
   };
 }
 
-async function buildAdminDashboard(activeYear) {
+async function buildAdminDashboard(activeYear, user) {
   const classFilter = activeYear ? { academicYear: activeYear._id } : {};
   const todayStart = startOfToday();
   const todayEnd = endOfToday();
@@ -272,7 +278,9 @@ async function buildAdminDashboard(activeYear) {
     todaysAdmissions,
     pendingDocuments,
     recentActivities,
-    operationalAnalytics
+    operationalAnalytics,
+    aiInsights,
+    trends
   ] = await Promise.all([
     Student.countDocuments({}),
     Student.countDocuments({ status: 'active' }),
@@ -283,8 +291,15 @@ async function buildAdminDashboard(activeYear) {
     Student.countDocuments({ admissionDate: { $gte: todayStart, $lte: todayEnd } }),
     Student.countDocuments(missingMandatoryDocsFilter()),
     buildRecentActivities(),
-    buildOperationalAnalytics(activeYear)
+    buildOperationalAnalytics(activeYear),
+    buildManagementInsights(activeYear, null, user || { email: 'system' }),
+    buildDashboardTrends(activeYear)
   ]);
+
+  const permissions = user ? await getPermissionsForRole(user.role) : {};
+  const systemHealth = user
+    ? await buildSystemHealth(user, permissions)
+    : null;
 
   return {
     activeYear,
@@ -298,6 +313,9 @@ async function buildAdminDashboard(activeYear) {
     pendingDocuments,
     recentActivities,
     operational: operationalAnalytics,
+    aiInsights,
+    trends,
+    systemHealth,
     students: totalStudents,
     teachers: totalTeachers
   };
@@ -326,10 +344,13 @@ async function buildScopedDashboard(req, activeYear) {
     teacherFilter = { _id: null };
   }
 
-  const [students, activeStudents, teachers] = await Promise.all([
+  const [students, activeStudents, teachers, aiInsights] = await Promise.all([
     Student.countDocuments(studentFilter),
     Student.countDocuments({ ...studentFilter, status: 'active' }),
-    Teacher.countDocuments(teacherFilter)
+    Teacher.countDocuments(teacherFilter),
+    req.user.role === ROLES.TEACHER
+      ? buildManagementInsights(activeYear, req.user.teacher, req.user)
+      : Promise.resolve(null)
   ]);
 
   return {
@@ -338,18 +359,24 @@ async function buildScopedDashboard(req, activeYear) {
     activeStudents,
     teachers,
     totalStudents: students,
-    activeTeachers: teachers
+    activeTeachers: teachers,
+    aiInsights
   };
 }
 
 exports.getDashboard = asyncHandler(async (req, res) => {
-  const activeYear = await AcademicYear.findOne({ $or: [{ status: 'active' }, { isActive: true }] })
-    .sort({ startDate: -1 })
-    .lean();
+  const managementRoles = new Set([ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.ACCOUNTANT, ROLES.PRINCIPAL]);
+  const cacheKey = `${req.user.role}:${req.user._id || req.user.id}`;
 
-  const payload = req.user.role === ROLES.ADMIN || req.user.role === ROLES.SUPER_ADMIN
-    ? await buildAdminDashboard(activeYear)
-    : await buildScopedDashboard(req, activeYear);
+  const payload = await getOrSet('dashboard', cacheKey, CACHE_TTL_MS.dashboard, async () => {
+    const activeYear = await AcademicYear.findOne({ $or: [{ status: 'active' }, { isActive: true }] })
+      .sort({ startDate: -1 })
+      .lean();
+
+    return managementRoles.has(req.user.role)
+      ? buildAdminDashboard(activeYear, req.user)
+      : buildScopedDashboard(req, activeYear);
+  });
 
   log.info('Dashboard loaded', { user: req.user.email, role: req.user.role });
   res.json(payload);

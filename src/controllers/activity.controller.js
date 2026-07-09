@@ -1,21 +1,28 @@
 const Activity = require('../models/Activity');
 const asyncHandler = require('../middleware/asyncHandler');
-const { HTTP_STATUS } = require('../constants');
+const { HTTP_STATUS, PAGINATION } = require('../constants');
+const { sendPaginated } = require('../utils/apiResponse');
+const { parsePaginationQuery } = require('../utils/pagination');
 
 exports.list = asyncHandler(async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 50, 200);
   const filter = {};
 
   if (req.query.module) filter.module = req.query.module;
   if (req.query.action) filter.action = req.query.action;
   if (req.query.entityId) filter.entityId = req.query.entityId;
+  if (req.query.search) {
+    const term = new RegExp(req.query.search.trim(), 'i');
+    filter.$or = [{ description: term }, { entityLabel: term }];
+  }
 
-  const activities = await Activity.find(filter)
-    .sort({ performedAt: -1 })
-    .limit(limit)
-    .lean();
+  const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
 
-  res.json(activities);
+  const [activities, totalItems] = await Promise.all([
+    Activity.find(filter).sort({ performedAt: -1 }).skip(skip).limit(pageSize).lean(),
+    Activity.countDocuments(filter)
+  ]);
+
+  return sendPaginated(res, activities, { page, pageSize, totalItems });
 });
 
 exports.get = asyncHandler(async (req, res) => {

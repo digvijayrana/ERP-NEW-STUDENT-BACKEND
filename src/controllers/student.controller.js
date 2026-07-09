@@ -22,6 +22,11 @@ const { createLogger } = require('../utils/logger');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+const { assertOptimisticVersion } = require('../utils/optimisticLock');
+const { invalidateNamespace } = require('../services/cache.service');
+const { maskStudentRecord } = require('../utils/dataMasking');
+const { logDocumentAccess } = require('../services/activityLog.service');
+const { issueAccessToken, validateAccessToken, getAccessTtlSeconds } = require('../services/documentAccess.service');
 
 const STUDENT_SORT_FIELDS = ['admissionNumber', 'firstName', 'admissionDate', 'status', 'createdAt'];
 
@@ -221,7 +226,11 @@ exports.list = asyncHandler(async (req, res) => {
     Student.countDocuments(filter)
   ]);
 
-  return sendPaginated(res, students, { page, pageSize, totalItems });
+  return sendPaginated(
+    res,
+    students.map((student) => maskStudentRecord(student, req.user, req.permissions)),
+    { page, pageSize, totalItems }
+  );
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -243,7 +252,7 @@ exports.get = asyncHandler(async (req, res) => {
     const canAccess = student.enrollments.some((enrollment) => classIds.some((id) => id.equals(enrollment.classRoom?._id || enrollment.classRoom)));
     if (!canAccess) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teacher can only access assigned class students' });
   }
-  res.json(student);
+  res.json(maskStudentRecord(student, req.user, req.permissions));
 });
 
 exports.update = asyncHandler(async (req, res) => {
@@ -253,6 +262,7 @@ exports.update = asyncHandler(async (req, res) => {
 
   const existing = await Student.findById(req.params.id);
   if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+  assertOptimisticVersion(existing, req.body.__v);
 
   const mergedData = { ...existing.toObject(), ...req.body };
   const latestEnrollment = req.body.enrollments?.[0] || existing.enrollments?.filter((e) => e.status === 'studying').pop() || existing.enrollments?.at(-1);
@@ -287,7 +297,9 @@ exports.update = asyncHandler(async (req, res) => {
   });
 
   log.info('Student updated', { studentId: student._id, user: req.user.email });
-  res.json(student);
+  invalidateNamespace('dashboard');
+  invalidateNamespace('globalSearch');
+  res.json(maskStudentRecord(student, req.user, req.permissions));
 });
 
 exports.updateStatus = asyncHandler(async (req, res) => {
@@ -397,36 +409,17 @@ exports.deleteDocument = asyncHandler(async (req, res) => {
 });
 
 exports.promote = asyncHandler(async (req, res) => {
-  const { studentIds, fromAcademicYear, toAcademicYear, toClassRoom } = req.body;
+  const { promoteLegacy } = require('../services/promotion.service');
+  const { studentIds, fromAcademicYear, toAcademicYear, toClassRoom, fromClassRoom } = req.body;
   if (!studentIds?.length || !fromAcademicYear || !toAcademicYear || !toClassRoom) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'studentIds, fromAcademicYear, toAcademicYear and toClassRoom are required' });
   }
 
-  const result = await Student.updateMany(
-    {
-      _id: { $in: studentIds },
-      enrollments: { $elemMatch: { academicYear: fromAcademicYear, status: 'studying' } }
-    },
-    {
-      $set: {
-        'enrollments.$[current].status': 'promoted',
-        'enrollments.$[current].toDate': new Date()
-      },
-      $push: {
-        enrollments: {
-          academicYear: toAcademicYear,
-          classRoom: toClassRoom,
-          status: 'studying',
-          fromDate: new Date()
-        }
-      }
-    },
-    {
-      arrayFilters: [{ 'current.academicYear': fromAcademicYear, 'current.status': 'studying' }]
-    }
+  const result = await promoteLegacy(
+    { studentIds, fromAcademicYear, toAcademicYear, toClassRoom, fromClassRoom },
+    req.user
   );
-
-  res.json({ promoted: result.modifiedCount });
+  res.json(result);
 });
 
 exports.verifyDocument = asyncHandler(async (req, res) => {
@@ -480,18 +473,49 @@ exports.getDocumentUrl = asyncHandler(async (req, res) => {
   const doc = student.documents.id(req.params.documentId);
   if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
 
-  const url = `${req.protocol}://${req.get('host')}/api/students/${req.params.id}/documents/${req.params.documentId}/file`;
-  res.json({ url, fileName: doc.title, mimeType: doc.mimeType });
+  const accessToken = issueAccessToken({
+    userId: req.user._id || req.user.id,
+    resourceType: 'student',
+    resourceId: student._id,
+    documentId: doc._id
+  });
+  const url = `${req.protocol}://${req.get('host')}/api/students/${req.params.id}/documents/${req.params.documentId}/file?accessToken=${accessToken}`;
+  res.json({
+    url,
+    fileName: doc.title,
+    mimeType: doc.mimeType,
+    expiresInSeconds: getAccessTtlSeconds()
+  });
 });
 
 exports.streamDocument = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
-  await ensureStudentDocumentAccess(req, student);
+  const accessToken = req.query.accessToken;
+  const tokenValid = accessToken && validateAccessToken(accessToken, {
+    userId: req.user._id || req.user.id,
+    resourceType: 'student',
+    resourceId: student._id,
+    documentId: req.params.documentId
+  });
+
+  if (!tokenValid) {
+    await ensureStudentDocumentAccess(req, student);
+  }
 
   const doc = student.documents.id(req.params.documentId);
   if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  logDocumentAccess({
+    module: MODULES.STUDENTS,
+    entityId: student._id,
+    entityLabel: student.admissionNumber,
+    documentType: doc.type,
+    user: req.user,
+    req,
+    meta: { documentId: doc._id, title: doc.title }
+  });
 
   const key = extractStorageKey(doc.fileUrl, doc.storageKey);
   if (!key) {

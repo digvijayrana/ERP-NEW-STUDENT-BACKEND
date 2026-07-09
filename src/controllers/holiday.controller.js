@@ -1,6 +1,9 @@
 const Holiday = require('../models/Holiday');
 const asyncHandler = require('../middleware/asyncHandler');
-const { HTTP_STATUS } = require('../constants');
+const { HTTP_STATUS, PAGINATION } = require('../constants');
+const { softDeleteDocument } = require('../services/softDelete.service');
+const { sendPaginated } = require('../utils/apiResponse');
+const { parsePaginationQuery } = require('../utils/pagination');
 
 exports.list = asyncHandler(async (req, res) => {
   const filter = {};
@@ -9,7 +12,20 @@ exports.list = asyncHandler(async (req, res) => {
     const y = parseInt(req.query.year, 10);
     filter.date = { $gte: new Date(y, 0, 1), $lte: new Date(y, 11, 31) };
   }
-  const holidays = await Holiday.find(filter).sort({ date: 1 });
+  if (req.query.search) {
+    filter.name = new RegExp(req.query.search.trim(), 'i');
+  }
+
+  const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
+  const [holidays, totalItems] = await Promise.all([
+    Holiday.find(filter).sort({ date: 1 }).skip(skip).limit(pageSize),
+    Holiday.countDocuments(filter)
+  ]);
+
+  if (req.query.page || req.query.pageSize) {
+    return sendPaginated(res, holidays, { page, pageSize, totalItems });
+  }
+
   res.json(holidays);
 });
 
@@ -26,7 +42,8 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.remove = asyncHandler(async (req, res) => {
-  const holiday = await Holiday.findByIdAndDelete(req.params.id);
+  const holiday = await Holiday.findById(req.params.id);
   if (!holiday) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Holiday not found' });
-  res.json({ message: 'Holiday deleted' });
+  await softDeleteDocument(holiday, req.user);
+  res.json({ message: 'Holiday removed', softDeleted: true });
 });

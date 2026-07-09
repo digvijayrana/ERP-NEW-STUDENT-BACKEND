@@ -10,10 +10,12 @@ const {
   voidPayment,
   unlockPayment,
   listFeeHistory,
+  listFeeHistoryPaginated,
   buildDemandData
 } = require('../services/fee.service');
 const { nextInvoiceNumber } = require('../services/sequence.service');
 const { logEntityCreate, logEntityUpdate } = require('../services/activityLog.service');
+const { assertReversalAllowed, logReversal, logUnlock } = require('../services/businessRules.service');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
@@ -221,17 +223,32 @@ exports.addPayment = asyncHandler(async (req, res) => {
 });
 
 exports.voidPayment = asyncHandler(async (req, res) => {
+  assertReversalAllowed('fee_void', req.user, req.permissions);
   const invoice = await FeeInvoice.findById(req.params.id);
   if (!invoice) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Invoice not found' });
 
-  const { invoice: updated, payment } = await voidPayment(invoice, req.params.paymentId, req.body.reason, req.user);
+  const payment = invoice.payments.id(req.params.paymentId);
+  const previousStatus = payment?.status;
+  const { invoice: updated, payment: voidedPayment } = await voidPayment(invoice, req.params.paymentId, req.body.reason, req.user);
+
+  logReversal({
+    module: FEE_MODULE,
+    entityId: updated._id,
+    entityLabel: voidedPayment.receiptNumber,
+    reversalType: 'fee_void',
+    user: req.user,
+    req,
+    previousValue: { status: previousStatus },
+    updatedValue: { status: 'void' },
+    remarks: req.body.reason
+  });
 
   logFeeActivity({
     action: 'receipt_void',
-    description: `Receipt voided: ${payment.receiptNumber}`,
+    description: `Receipt voided: ${voidedPayment.receiptNumber}`,
     user: req.user,
     entityId: updated._id,
-    entityLabel: payment.receiptNumber,
+    entityLabel: voidedPayment.receiptNumber,
     meta: { reason: req.body.reason }
   });
 
@@ -239,17 +256,29 @@ exports.voidPayment = asyncHandler(async (req, res) => {
 });
 
 exports.unlockPayment = asyncHandler(async (req, res) => {
+  assertReversalAllowed('fee_unlock', req.user, req.permissions);
   const invoice = await FeeInvoice.findById(req.params.id);
   if (!invoice) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Invoice not found' });
 
-  const { invoice: updated, payment } = await unlockPayment(invoice, req.params.paymentId);
+  const payment = invoice.payments.id(req.params.paymentId);
+  const { invoice: updated, payment: unlockedPayment } = await unlockPayment(invoice, req.params.paymentId);
+
+  logUnlock({
+    module: FEE_MODULE,
+    entityId: updated._id,
+    entityLabel: unlockedPayment.receiptNumber,
+    user: req.user,
+    req,
+    previousValue: { locked: true },
+    updatedValue: { locked: false }
+  });
 
   logFeeActivity({
     action: 'receipt_unlock',
-    description: `Receipt unlocked: ${payment.receiptNumber}`,
+    description: `Receipt unlocked: ${unlockedPayment.receiptNumber}`,
     user: req.user,
     entityId: updated._id,
-    entityLabel: payment.receiptNumber
+    entityLabel: unlockedPayment.receiptNumber
   });
 
   res.json(await populateInvoice(updated._id));
@@ -269,6 +298,18 @@ exports.feeHistory = asyncHandler(async (req, res) => {
   }
 
   let history = await listFeeHistory(filter);
+
+  if (req.query.page || req.query.pageSize || req.query.search || req.query.paymentStatus) {
+    const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
+    const paginated = await listFeeHistoryPaginated({
+      filter,
+      search: req.query.search,
+      paymentStatus: req.query.paymentStatus,
+      skip,
+      limit: pageSize
+    });
+    return sendPaginated(res, paginated.rows, { page, pageSize, totalItems: paginated.totalItems });
+  }
 
   if (req.query.search) {
     const term = req.query.search.trim().toLowerCase();

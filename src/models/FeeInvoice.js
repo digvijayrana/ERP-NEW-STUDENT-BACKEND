@@ -56,6 +56,10 @@ feeInvoiceSchema.index(
   { student: 1, academicYear: 1, feeMonth: 1, feeYear: 1 },
   { unique: true, partialFilterExpression: { status: { $ne: 'cancelled' } } }
 );
+feeInvoiceSchema.index({ status: 1, feeYear: -1, feeMonth: -1 });
+feeInvoiceSchema.index({ academicYear: 1, classRoom: 1, status: 1 });
+feeInvoiceSchema.index({ 'payments.receiptNumber': 1 });
+feeInvoiceSchema.index({ invoiceNumber: 1 });
 
 feeInvoiceSchema.virtual('totalAmount').get(function totalAmount() {
   if (this.tuitionFee || this.busFee || this.otherCharges || this.previousPending) {

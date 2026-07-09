@@ -1,6 +1,7 @@
 const { createLogger } = require('../utils/logger');
 const { sendError } = require('../utils/apiResponse');
 const { duplicateKeyField } = require('../utils/pagination');
+const { recordException } = require('../services/errorMonitoring.service');
 const { HTTP_STATUS, DB } = require('../constants');
 
 const log = createLogger('errors');
@@ -11,6 +12,15 @@ function mapValidationErrors(err) {
     field,
     message: detail.message
   }));
+}
+
+function classifyErrorType(err, status) {
+  if (err.name === 'ValidationError' || err.name === 'CastError') return 'validation_error';
+  if (status === HTTP_STATUS.UNAUTHORIZED) return 'authentication_failure';
+  if (status === HTTP_STATUS.FORBIDDEN) return 'authorization_failure';
+  if (err.code === DB.MONGOOSE_DUPLICATE_KEY_CODE) return 'database_error';
+  if (status >= HTTP_STATUS.INTERNAL_SERVER_ERROR) return 'unhandled_exception';
+  return 'api_error';
 }
 
 module.exports = function errorHandler(err, req, res, _next) {
@@ -38,9 +48,25 @@ module.exports = function errorHandler(err, req, res, _next) {
     message = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : message;
   }
 
+  const errorType = classifyErrorType(err, status);
+
+  recordException({
+    type: errorType,
+    message,
+    status,
+    code,
+    path: req.originalUrl,
+    method: req.method,
+    requestId: req.requestId,
+    user: req.user,
+    req,
+    stack: err.stack
+  });
+
   log.error(message, {
     status,
     code,
+    type: errorType,
     requestId: req.requestId,
     path: req.originalUrl,
     method: req.method,

@@ -1,4 +1,4 @@
-const ACTIONS = ['view', 'create', 'edit', 'deactivate', 'export', 'approve'];
+const ACTIONS = ['view', 'create', 'edit', 'delete', 'deactivate', 'export', 'print', 'approve', 'unlock'];
 
 const MODULES = [
   'dashboard',
@@ -14,7 +14,8 @@ const MODULES = [
   'timetable',
   'exams',
   'reports',
-  'transport'
+  'transport',
+  'governance'
 ];
 
 function allPermissions(value = true) {
@@ -44,20 +45,42 @@ const DEFAULT_ROLE_PERMISSIONS = {
     name: 'Admin',
     description: 'School administrator with full operational access',
     permissions: modulePerms({
-      dashboard: { view: true, export: true },
+      dashboard: { view: true, export: true, print: true },
       academic_year: { view: true, create: true, edit: true, deactivate: true },
-      classes: { view: true, create: true, edit: true, deactivate: true, export: true },
-      teachers: { view: true, create: true, edit: true, deactivate: true, export: true },
-      students: { view: true, create: true, edit: true, deactivate: true, export: true, approve: true },
-      users: { view: true, create: true, edit: true, deactivate: true },
+      classes: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      teachers: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      students: { view: true, create: true, edit: true, delete: true, deactivate: true, export: true, print: true, approve: true, unlock: true },
+      users: { view: true, create: true, edit: true, deactivate: true, unlock: true },
       roles: { view: true },
-      attendance: { view: true, create: true, edit: true, export: true },
-      fees: { view: true, create: true, edit: true },
-      payroll: { view: true, create: true, edit: true },
-      timetable: { view: true, create: true, edit: true },
-      exams: { view: true, create: true, edit: true, approve: true },
-      reports: { view: true, export: true },
-      transport: { view: true, create: true, edit: true, deactivate: true, export: true }
+      attendance: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
+      fees: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
+      payroll: { view: true, create: true, edit: true, export: true, print: true, approve: true, unlock: true },
+      timetable: { view: true, create: true, edit: true, print: true },
+      exams: { view: true, create: true, edit: true, delete: true, approve: true, print: true },
+      reports: { view: true, export: true, print: true },
+      transport: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      governance: { view: true, edit: true, export: true, print: true }
+    })
+  },
+  principal: {
+    name: 'Principal',
+    description: 'School leadership with oversight across academic and operational modules',
+    permissions: modulePerms({
+      dashboard: { view: true, export: true, print: true },
+      academic_year: { view: true, edit: true },
+      classes: { view: true, edit: true, export: true, print: true },
+      teachers: { view: true, edit: true, export: true, print: true },
+      students: { view: true, edit: true, export: true, print: true, approve: true },
+      users: { view: true },
+      roles: { view: true },
+      attendance: { view: true, export: true, print: true, unlock: true },
+      fees: { view: true, export: true, print: true },
+      payroll: { view: true, export: true, print: true, approve: true },
+      timetable: { view: true, print: true },
+      exams: { view: true, approve: true, print: true },
+      reports: { view: true, export: true, print: true },
+      transport: { view: true, export: true, print: true },
+      governance: { view: true, print: true }
     })
   },
   teacher: {
@@ -67,10 +90,32 @@ const DEFAULT_ROLE_PERMISSIONS = {
       dashboard: { view: true },
       classes: { view: true },
       teachers: { view: true, edit: true },
-      students: { view: true },
-      attendance: { view: true, create: true, edit: true },
-      timetable: { view: true },
-      exams: { view: true, create: true, edit: true }
+      students: { view: true, print: true },
+      attendance: { view: true, create: true, edit: true, print: true },
+      timetable: { view: true, print: true },
+      exams: { view: true, create: true, edit: true, print: true }
+    })
+  },
+  accountant: {
+    name: 'Accountant',
+    description: 'Finance and fee operations',
+    permissions: modulePerms({
+      dashboard: { view: true, export: true },
+      students: { view: true, export: true, print: true },
+      fees: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
+      payroll: { view: true, export: true, print: true, approve: true, unlock: true },
+      reports: { view: true, export: true, print: true },
+      transport: { view: true, export: true, print: true }
+    })
+  },
+  transport_manager: {
+    name: 'Transport Manager',
+    description: 'Bus routes, registrations, and transport operations',
+    permissions: modulePerms({
+      dashboard: { view: true },
+      students: { view: true, export: true },
+      transport: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      reports: { view: true, export: true, print: true }
     })
   },
   reception: {
@@ -80,21 +125,21 @@ const DEFAULT_ROLE_PERMISSIONS = {
       dashboard: { view: true },
       academic_year: { view: true },
       classes: { view: true },
-      students: { view: true, create: true, edit: true, export: true },
+      students: { view: true, create: true, edit: true, export: true, print: true },
       teachers: { view: true },
       transport: { view: true, create: true, edit: true }
     })
   },
-  accountant: {
-    name: 'Accountant',
-    description: 'Finance and fee operations',
+  receptionist: {
+    name: 'Receptionist',
+    description: 'Front office admissions and student records',
     permissions: modulePerms({
       dashboard: { view: true },
-      students: { view: true, export: true },
-      fees: { view: true, create: true, edit: true, export: true },
-      payroll: { view: true, export: true },
-      reports: { view: true, export: true },
-      transport: { view: true, export: true }
+      academic_year: { view: true },
+      classes: { view: true },
+      students: { view: true, create: true, edit: true, export: true, print: true },
+      teachers: { view: true },
+      transport: { view: true, create: true, edit: true }
     })
   },
   parent: {
@@ -105,7 +150,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       students: { view: true },
       attendance: { view: true },
       fees: { view: true },
-      timetable: { view: true },
+      timetable: { view: true, print: true },
       exams: { view: true }
     })
   },
@@ -117,7 +162,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       students: { view: true },
       attendance: { view: true },
       fees: { view: true },
-      timetable: { view: true },
+      timetable: { view: true, print: true },
       exams: { view: true }
     })
   }

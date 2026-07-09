@@ -2,6 +2,7 @@ const Activity = require('../models/Activity');
 const { ACTIONS } = require('../constants/activityActions');
 const { createLogger } = require('../utils/logger');
 const { auditOnCreate, auditOnUpdate } = require('../utils/auditFields');
+const { auditContextFromRequest } = require('../utils/auditRequest');
 
 const log = createLogger('activity-log');
 
@@ -42,7 +43,20 @@ function buildStatusChangeEntry(previousStatus, newStatus, user, remarks, extraM
   );
 }
 
-function recordActivity({ module, entityId, entityLabel, action, description, user, meta }) {
+function recordActivity({
+  module,
+  entityId,
+  entityLabel,
+  action,
+  description,
+  user,
+  meta,
+  req,
+  previousValue,
+  updatedValue,
+  remarks
+}) {
+  const audit = auditContextFromRequest(req);
   const payload = {
     module,
     entityId,
@@ -51,7 +65,15 @@ function recordActivity({ module, entityId, entityLabel, action, description, us
     description,
     performedBy: performerFromUser(user),
     performedAt: new Date(),
-    meta: meta || {}
+    ipAddress: audit.ipAddress,
+    userAgent: audit.userAgent,
+    previousValue,
+    updatedValue,
+    remarks,
+    meta: {
+      ...(meta || {}),
+      requestId: audit.requestId
+    }
   };
 
   setImmediate(() => {
@@ -62,22 +84,70 @@ function recordActivity({ module, entityId, entityLabel, action, description, us
 }
 
 function recordActivitySync(payload) {
+  const audit = auditContextFromRequest(payload.req);
   return Activity.create({
-    ...payload,
+    module: payload.module,
+    entityId: payload.entityId,
+    entityLabel: payload.entityLabel,
+    action: payload.action,
+    description: payload.description,
     performedBy: performerFromUser(payload.user),
-    performedAt: new Date()
+    performedAt: new Date(),
+    ipAddress: audit.ipAddress,
+    userAgent: audit.userAgent,
+    previousValue: payload.previousValue,
+    updatedValue: payload.updatedValue,
+    remarks: payload.remarks,
+    meta: {
+      ...(payload.meta || {}),
+      requestId: audit.requestId
+    }
   });
 }
 
-function logEntityCreate({ module, entityId, entityLabel, action, description, user, meta }) {
-  recordActivity({ module, entityId, entityLabel, action, description, user, meta });
+function logEntityCreate({ module, entityId, entityLabel, action, description, user, meta, req }) {
+  recordActivity({ module, entityId, entityLabel, action, description, user, meta, req });
 }
 
-function logEntityUpdate({ module, entityId, entityLabel, action, description, user, meta }) {
-  recordActivity({ module, entityId, entityLabel, action, description, user, meta });
+function logEntityUpdate({
+  module,
+  entityId,
+  entityLabel,
+  action,
+  description,
+  user,
+  meta,
+  req,
+  previousValue,
+  updatedValue,
+  remarks
+}) {
+  recordActivity({
+    module,
+    entityId,
+    entityLabel,
+    action,
+    description,
+    user,
+    meta,
+    req,
+    previousValue,
+    updatedValue,
+    remarks
+  });
 }
 
-function logStatusChange({ module, entityId, entityLabel, previousStatus, newStatus, user, remarks, meta }) {
+function logStatusChange({
+  module,
+  entityId,
+  entityLabel,
+  previousStatus,
+  newStatus,
+  user,
+  remarks,
+  meta,
+  req
+}) {
   const description = `${entityLabel || 'Record'} status changed from ${previousStatus} to ${newStatus}`;
   recordActivity({
     module,
@@ -86,10 +156,30 @@ function logStatusChange({ module, entityId, entityLabel, previousStatus, newSta
     action: ACTIONS.STATUS_CHANGE,
     description,
     user,
+    req,
+    previousValue: previousStatus,
+    updatedValue: newStatus,
+    remarks,
     meta: {
       previousStatus,
       newStatus,
       remarks: remarks || undefined,
+      ...meta
+    }
+  });
+}
+
+function logDocumentAccess({ module, entityId, entityLabel, documentType, user, req, meta }) {
+  recordActivity({
+    module,
+    entityId,
+    entityLabel,
+    action: ACTIONS.DOCUMENT_ACCESS,
+    description: `Document accessed: ${documentType || 'file'} for ${entityLabel || entityId}`,
+    user,
+    req,
+    meta: {
+      documentType,
       ...meta
     }
   });
@@ -106,5 +196,6 @@ module.exports = {
   recordActivitySync,
   logEntityCreate,
   logEntityUpdate,
-  logStatusChange
+  logStatusChange,
+  logDocumentAccess
 };

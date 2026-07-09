@@ -3,6 +3,10 @@ const Teacher = require('../models/Teacher');
 const { HTTP_STATUS } = require('../constants');
 const { periodFromParts } = require('../utils/effectivePeriod');
 const { integrityError, logIntegrityFailure } = require('./integrity.service');
+const { assertOptimisticVersion } = require('../utils/optimisticLock');
+const { softDeleteDocument } = require('./softDelete.service');
+const { validateActiveTeacherReference } = require('./dataQuality.service');
+const { getPolicySection } = require('./governanceConfig.service');
 
 const PAYROLL_MODULE = 'payroll';
 
@@ -88,7 +92,7 @@ function assertPayrollEditable(payroll, audit) {
 
 async function validateTeacherForPayroll(teacherId) {
   const teacher = await Teacher.findById(teacherId);
-  if (!teacher) {
+  if (!teacher || teacher.isDeleted) {
     const error = new Error('Teacher not found');
     error.status = HTTP_STATUS.NOT_FOUND;
     throw error;
@@ -96,6 +100,11 @@ async function validateTeacherForPayroll(teacherId) {
   if (teacher.status !== 'active') {
     throw integrityError('Payroll can only be created for active teachers', 'INACTIVE_TEACHER');
   }
+  await validateActiveTeacherReference(teacher._id, {
+    module: PAYROLL_MODULE,
+    entityId: teacher._id,
+    entityLabel: teacher.employeeCode
+  });
   return teacher;
 }
 
@@ -137,6 +146,7 @@ async function updatePayroll(payrollId, payload, user, audit) {
   }
 
   assertPayrollEditable(payroll, audit);
+  assertOptimisticVersion(payroll, payload.__v);
 
   if (payload.basicSalary !== undefined) payroll.basicSalary = Math.max(Number(payload.basicSalary) || 0, 0);
   if (payload.allowances !== undefined) payroll.allowances = Math.max(Number(payload.allowances) || 0, 0);
@@ -161,13 +171,16 @@ async function markPayrollPaid(payrollId, payload, user, audit) {
     throw integrityError('Payroll is already paid and locked', 'LOCKED_RECORD');
   }
 
+  const policies = await getPolicySection('payrollPolicies');
   payroll.status = 'paid';
   payroll.paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
   payroll.paymentMode = payload.paymentMode || payroll.paymentMode;
   if (payload.remarks !== undefined) payroll.remarks = payload.remarks;
-  payroll.locked = true;
-  payroll.lockedAt = new Date();
-  payroll.lockedBy = user?.id;
+  if (policies.lockOnMarkPaid !== false) {
+    payroll.locked = true;
+    payroll.lockedAt = new Date();
+    payroll.lockedBy = user?.id;
+  }
   payroll.updatedBy = user?.id;
   await payroll.save();
 
@@ -183,8 +196,12 @@ async function removePayroll(payrollId, user, audit) {
   }
 
   assertPayrollEditable(payroll, audit);
-  await payroll.deleteOne();
-  return { deleted: true };
+  const policies = await getPolicySection('payrollPolicies');
+  if (policies.allowDeletePendingOnly !== false && payroll.status !== 'pending') {
+    throw integrityError('Only pending payroll records can be deleted', 'LOCKED_RECORD');
+  }
+  await softDeleteDocument(payroll, user);
+  return { deleted: true, softDeleted: true };
 }
 
 async function unlockPayroll(payrollId, user) {

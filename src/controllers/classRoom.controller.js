@@ -17,10 +17,13 @@ const {
   ensureClassCapacityNotBelowEnrollment,
   ensureClassHasNoEnrolledStudents
 } = require('../services/integrity.service');
+const { softDeleteDocument } = require('../services/softDelete.service');
 const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+const { assertOptimisticVersion } = require('../utils/optimisticLock');
+const { invalidateNamespace } = require('../services/cache.service');
 
 const CLASS_SORT_FIELDS = ['name', 'monthlyFee', 'status', 'createdAt'];
 
@@ -138,6 +141,7 @@ exports.list = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const existing = await ClassRoom.findById(req.params.id);
   if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Class not found' });
+  assertOptimisticVersion(existing, req.body.__v);
 
   await ensureAcademicYearEditable(existing.academicYear);
 
@@ -159,6 +163,8 @@ exports.update = asyncHandler(async (req, res) => {
 
   Object.assign(existing, payload, auditOnUpdate(req.user));
   await existing.save();
+  invalidateNamespace('dashboard');
+  invalidateNamespace('masterData');
 
   log.info('Class updated', { id: existing._id, name: existing.name, section: existing.section, userId: req.user?.id });
 
@@ -204,9 +210,9 @@ exports.remove = asyncHandler(async (req, res) => {
 
   await ensureClassHasNoEnrolledStudents(classRoom._id);
 
-  await classRoom.deleteOne();
-  log.info('Class deleted', { id: classRoom._id, name: classRoom.name, section: classRoom.section, userId: req.user?.id });
-  res.json({ deleted: true });
+  await softDeleteDocument(classRoom, req.user);
+  log.info('Class soft deleted', { id: classRoom._id, name: classRoom.name, section: classRoom.section, userId: req.user?.id });
+  res.json({ deleted: true, softDeleted: true });
 });
 
 exports.toggleStatus = asyncHandler(async (req, res) => {

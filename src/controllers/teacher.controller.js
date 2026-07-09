@@ -16,6 +16,9 @@ const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+const { maskTeacherRecord } = require('../utils/dataMasking');
+const { logDocumentAccess } = require('../services/activityLog.service');
+const { issueAccessToken, validateAccessToken, getAccessTtlSeconds } = require('../services/documentAccess.service');
 
 const TEACHER_SORT_FIELDS = ['firstName', 'employeeCode', 'phone', 'baseSalary', 'status', 'createdAt'];
 const log = createLogger('teachers');
@@ -68,7 +71,11 @@ exports.list = asyncHandler(async (req, res) => {
     Teacher.countDocuments(filter)
   ]);
 
-  return sendPaginated(res, teachers, { page, pageSize, totalItems });
+  return sendPaginated(
+    res,
+    teachers.map((teacher) => maskTeacherRecord(teacher, req.user, req.permissions)),
+    { page, pageSize, totalItems }
+  );
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -77,7 +84,7 @@ exports.get = asyncHandler(async (req, res) => {
   }
   const teacher = await Teacher.findById(req.params.id);
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
-  res.json(teacher);
+  res.json(maskTeacherRecord(teacher, req.user, req.permissions));
 });
 
 exports.update = asyncHandler(async (req, res) => {
@@ -142,7 +149,7 @@ exports.update = asyncHandler(async (req, res) => {
     });
   }
 
-  res.json(teacher);
+  res.json(maskTeacherRecord(teacher, req.user, req.permissions));
 });
 
 exports.remove = asyncHandler(async (req, res) => {
@@ -223,7 +230,7 @@ exports.selfUpdate = asyncHandler(async (req, res) => {
 
   const teacher = await Teacher.findByIdAndUpdate(teacherId, updates, { new: true, runValidators: true });
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
-  res.json(teacher);
+  res.json(maskTeacherRecord(teacher, req.user, req.permissions));
 });
 
 exports.selfUploadDocument = asyncHandler(async (req, res) => {
@@ -292,21 +299,46 @@ exports.getDocumentUrl = asyncHandler(async (req, res) => {
   const doc = teacher.documents?.[docType];
   if (!doc?.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
 
-  const url = `${req.protocol}://${req.get('host')}/api/teachers/${req.params.id}/documents/${docType}/file`;
-  res.json({ url });
+  const accessToken = issueAccessToken({
+    userId: req.user._id || req.user.id,
+    resourceType: 'teacher',
+    resourceId: teacher._id,
+    documentId: docType
+  });
+  const url = `${req.protocol}://${req.get('host')}/api/teachers/${req.params.id}/documents/${docType}/file?accessToken=${accessToken}`;
+  res.json({ url, expiresInSeconds: getAccessTtlSeconds() });
 });
 
 exports.streamDocument = asyncHandler(async (req, res) => {
   const teacher = await Teacher.findById(req.params.id);
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
 
-  if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
+  const docType = req.params.docType;
+  const accessToken = req.query.accessToken;
+  const tokenValid = accessToken && validateAccessToken(accessToken, {
+    userId: req.user._id || req.user.id,
+    resourceType: 'teacher',
+    resourceId: teacher._id,
+    documentId: docType
+  });
+
+  if (!tokenValid) {
+    if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
+    }
   }
 
-  const docType = req.params.docType;
   const doc = teacher.documents?.[docType];
   if (!doc?.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  logDocumentAccess({
+    module: MODULES.TEACHERS,
+    entityId: teacher._id,
+    entityLabel: teacher.employeeCode,
+    documentType: docType,
+    user: req.user,
+    req
+  });
 
   const key = extractStorageKey(doc.url, doc.storageKey);
   if (!key) {

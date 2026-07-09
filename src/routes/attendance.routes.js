@@ -7,7 +7,7 @@ router.get('/register', requirePermission('attendance', 'view'), controller.getR
 router.post('/register/save', requirePermission('attendance', 'create'), controller.saveRegister);
 router.post('/register/submit', requirePermission('attendance', 'edit'), controller.submitRegister);
 router.post('/register/lock', requirePermission('attendance', 'edit'), controller.lockRegister);
-router.post('/register/unlock', authorize('admin', 'super_admin'), controller.unlockRegister);
+router.post('/register/unlock', requirePermission('attendance', 'unlock'), controller.unlockRegister);
 router.get('/summary/:studentId', requirePermission('attendance', 'view'), controller.summary);
 router.get('/reports/:type', requirePermission('attendance', 'view'), controller.getReport);
 router.get('/reports/:type/pdf', requirePermission('attendance', 'export'), controller.downloadReportPdf);

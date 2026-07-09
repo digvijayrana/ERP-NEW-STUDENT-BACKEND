@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 const payrollSchema = new mongoose.Schema(
   {
@@ -19,10 +20,13 @@ const payrollSchema = new mongoose.Schema(
     unlockedAt: Date,
     unlockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     remarks: String,
+    ...softDeleteFieldSchema,
     ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+applySoftDeleteMiddleware(payrollSchema);
 
 payrollSchema.virtual('netSalary').get(function netSalary() {
   return this.basicSalary + this.allowances - this.deductions;

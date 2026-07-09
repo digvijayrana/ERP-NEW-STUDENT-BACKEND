@@ -8,17 +8,20 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
-    role: {
-      type: String,
-      enum: ['super_admin', 'admin', 'teacher', 'reception', 'accountant', 'student', 'parent'],
-      required: true
-    },
+    role: { type: String, required: true, trim: true, index: true },
     teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
     linkedStudent: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
     linkedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Student' }],
     isActive: { type: Boolean, default: true },
     lastLoginAt: Date,
+    failedLoginAttempts: { type: Number, default: 0 },
+    lockedUntil: Date,
+    mustChangePassword: { type: Boolean, default: false },
+    isTemporaryPassword: { type: Boolean, default: false },
+    passwordChangedAt: Date,
+    passwordExpiresAt: Date,
+    securityVersion: { type: Number, default: 0 },
     ...auditFieldSchema
   },
   { timestamps: true }
@@ -26,6 +29,7 @@ const userSchema = new mongoose.Schema(
 
 userSchema.methods.setPassword = async function setPassword(password) {
   this.passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+  this.passwordChangedAt = new Date();
 };
 
 userSchema.methods.comparePassword = function comparePassword(password) {
@@ -45,7 +49,11 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     student: this.student,
     linkedStudent: this.linkedStudent,
     linkedStudents: linked,
-    isActive: this.isActive
+    isActive: this.isActive,
+    mustChangePassword: this.mustChangePassword,
+    isTemporaryPassword: this.isTemporaryPassword,
+    passwordExpiresAt: this.passwordExpiresAt,
+    lockedUntil: this.lockedUntil
   };
 };
 

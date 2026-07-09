@@ -6,7 +6,12 @@ const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { generateExamQuestions, gradeAnswer, calculateGrade } = require('../services/aiQuestion.service');
-const { HTTP_STATUS, ROLES, EXAM } = require('../constants');
+const { HTTP_STATUS, ROLES, EXAM, PAGINATION } = require('../constants');
+const { softDeleteDocument } = require('../services/softDelete.service');
+const { sendPaginated } = require('../utils/apiResponse');
+const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+
+const EXAM_SORT_FIELDS = ['title', 'subject', 'status', 'createdAt', 'scheduledAt'];
 
 const log = createLogger('exams');
 const PERCENTAGE_MULTIPLIER = 100;
@@ -45,17 +50,34 @@ function stripAnswers(exam) {
 
 exports.list = asyncHandler(async (req, res) => {
   const filter = await accessibleClassFilter(req);
-  const exams = await Exam.find(filter)
-    .populate('classRoom', 'name section')
-    .populate('academicYear', 'name')
-    .populate('createdBy', 'firstName lastName')
-    .sort({ createdAt: -1 });
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.search) {
+    const term = new RegExp(req.query.search.trim(), 'i');
+    filter.$or = [{ title: term }, { subject: term }, { chapter: term }];
+  }
+
+  const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
+  const sort = parseSortQuery(req.query, EXAM_SORT_FIELDS, 'createdAt');
+
+  const [exams, totalItems] = await Promise.all([
+    Exam.find(filter)
+      .populate('classRoom', 'name section')
+      .populate('academicYear', 'name')
+      .populate('createdBy', 'firstName lastName')
+      .sort(sort)
+      .skip(skip)
+      .limit(pageSize),
+    Exam.countDocuments(filter)
+  ]);
 
   const payload = req.user.role === ROLES.STUDENT || req.user.role === ROLES.PARENT
     ? exams.map(stripAnswers)
     : exams;
 
-  log.info('Exam list fetched', { user: req.user.email, count: payload.length });
+  log.info('Exam list fetched', { user: req.user.email, count: payload.length, totalItems });
+  if (req.query.page || req.query.pageSize) {
+    return sendPaginated(res, payload, { page, pageSize, totalItems });
+  }
   res.json(payload);
 });
 
@@ -429,7 +451,7 @@ exports.deleteExam = asyncHandler(async (req, res) => {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Close the exam before deleting' });
   }
   await ExamSubmission.deleteMany({ exam: exam._id });
-  await exam.deleteOne();
-  log.warn('Exam deleted', { examId: req.params.id, user: req.user.email });
-  res.json({ deleted: true });
+  await softDeleteDocument(exam, req.user);
+  log.warn('Exam soft deleted', { examId: req.params.id, user: req.user.email });
+  res.json({ deleted: true, softDeleted: true });
 });

@@ -12,6 +12,7 @@ const {
   buildActivityTimeline
 } = require('../services/studentProfile.service');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
+const { maskStudentRecord } = require('../utils/dataMasking');
 
 const log = createLogger('students');
 const PERCENTAGE_MULTIPLIER = 100;
@@ -140,7 +141,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
   const docStatus = mandatoryDocumentStatus(student.documents);
 
   const profilePayload = {
-    student: {
+    student: maskStudentRecord({
       _id: student._id,
       admissionNumber: student.admissionNumber,
       firstName: student.firstName,
@@ -161,7 +162,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
       address: student.address,
       guardians: student.guardians,
       photoUrl: photoDoc?.fileUrl || null
-    },
+    }, req.user, req.permissions),
     academic: {
       className: latestEnrollment?.classRoom
         ? `${latestEnrollment.classRoom.name}-${latestEnrollment.classRoom.section}`

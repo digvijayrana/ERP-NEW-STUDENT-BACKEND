@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 const questionSchema = new mongoose.Schema(
   {
@@ -32,10 +33,17 @@ const examSchema = new mongoose.Schema(
     scheduledAt: Date,
     closesAt: Date,
     aiGenerated: { type: Boolean, default: false },
-    questionCount: { type: Number, default: 10 }
+    questionCount: { type: Number, default: 10 },
+    ...softDeleteFieldSchema
   },
   { timestamps: true }
 );
+
+applySoftDeleteMiddleware(examSchema);
+
+examSchema.index({ classRoom: 1, academicYear: 1, status: 1, createdAt: -1 });
+examSchema.index({ status: 1, createdAt: -1 });
+examSchema.index({ title: 1, subject: 1 });
 
 examSchema.pre('save', function preSave() {
   this.totalMarks = this.questions.reduce((sum, q) => sum + (q.marks || 1), 0);

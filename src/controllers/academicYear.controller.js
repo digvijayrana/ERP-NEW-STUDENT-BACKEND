@@ -21,6 +21,8 @@ const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+const { archiveAcademicYearData } = require('../services/academicYearArchive.service');
+const { softDeleteDocument } = require('../services/softDelete.service');
 
 const YEAR_SORT_FIELDS = ['name', 'startDate', 'endDate', 'status', 'createdAt'];
 
@@ -244,7 +246,9 @@ exports.close = asyncHandler(async (req, res) => {
   Object.assign(year, auditOnUpdate(req.user));
   await year.save();
 
-  log.info('Academic year closed', { id: year._id, name: year.name, userId: req.user?.id });
+  const archiveSummary = await archiveAcademicYearData(year._id, req.user);
+
+  log.info('Academic year closed', { id: year._id, name: year.name, userId: req.user?.id, archiveSummary });
 
   logStatusChange({
     module: MODULES.ACADEMIC_YEARS,
@@ -265,7 +269,7 @@ exports.close = asyncHandler(async (req, res) => {
     user: req.user
   });
 
-  res.json(normalizeStatus(year));
+  res.json({ ...normalizeStatus(year), archiveSummary });
 });
 
 exports.remove = asyncHandler(async (req, res) => {
@@ -285,7 +289,7 @@ exports.remove = asyncHandler(async (req, res) => {
     });
   }
 
-  await year.deleteOne();
-  log.info('Academic year deleted', { id: year._id, name: year.name, userId: req.user?.id });
-  res.json({ deleted: true });
+  await softDeleteDocument(year, req.user);
+  log.info('Academic year soft deleted', { id: year._id, name: year.name, userId: req.user?.id });
+  res.json({ deleted: true, softDeleted: true });
 });

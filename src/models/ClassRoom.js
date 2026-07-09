@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
+const { softDeleteFieldSchema, applySoftDeleteMiddleware } = require('../utils/softDeleteFields');
 
 const classRoomSchema = new mongoose.Schema(
   {
@@ -16,10 +17,13 @@ const classRoomSchema = new mongoose.Schema(
     ],
     monthlyFee: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    ...softDeleteFieldSchema,
     ...auditFieldSchema
   },
   { timestamps: true }
 );
+
+applySoftDeleteMiddleware(classRoomSchema);
 
 classRoomSchema.index({ name: 1, section: 1, academicYear: 1 }, { unique: true });
 classRoomSchema.index(

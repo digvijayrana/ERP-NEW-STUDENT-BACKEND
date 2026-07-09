@@ -3,8 +3,12 @@ const ClassRoom = require('../models/ClassRoom');
 const FeeInvoice = require('../models/FeeInvoice');
 const Payroll = require('../models/Payroll');
 const Teacher = require('../models/Teacher');
+const Activity = require('../models/Activity');
+const ExamSubmission = require('../models/ExamSubmission');
 const attendanceService = require('./attendance.service');
 const busService = require('./bus.service');
+const promotionService = require('./promotion.service');
+const { buildStudentInsight, listScopedStudents } = require('./aiInsightsEngine.service');
 const { HTTP_STATUS } = require('../constants');
 
 const PRESENT_STATUSES = new Set(['present', 'late', 'half_day']);
@@ -166,9 +170,134 @@ async function buildStudentReport(reportType, filters = {}) {
     return [...grouped.values()].sort((a, b) => a.status.localeCompare(b.status));
   }
 
+  if (reportType === 'class-register') {
+    return [...rows].sort((a, b) => {
+      const classCmp = (a.classSection || '').localeCompare(b.classSection || '');
+      if (classCmp !== 0) return classCmp;
+      return String(a.rollNumber).localeCompare(String(b.rollNumber));
+    });
+  }
+
+  if (reportType === 'inactive-students') {
+    const inactive = await Student.find({ status: { $ne: 'active' } }).sort({ admissionNumber: 1 }).lean();
+    const classIds = [];
+    const rows = [];
+    for (const student of inactive) {
+      const enrollment = resolveEnrollment(student, filters.academicYear);
+      if (filters.academicYear && !enrollment) continue;
+      if (filters.classRoom && String(enrollment?.classRoom) !== String(filters.classRoom)) continue;
+      if (enrollment?.classRoom) classIds.push(enrollment.classRoom);
+      rows.push({ student, enrollment });
+    }
+    const classMap = await loadClassMap(classIds);
+    return rows.map(({ student, enrollment }) => {
+      const room = enrollment?.classRoom ? classMap[String(enrollment.classRoom)] : null;
+      return {
+        admissionNumber: student.admissionNumber,
+        studentName: studentLabel(student),
+        status: student.status,
+        classSection: classLabel(room),
+        admissionDate: student.admissionDate
+      };
+    });
+  }
+
   const error = new Error('Unknown student report type');
   error.status = HTTP_STATUS.BAD_REQUEST;
   throw error;
+}
+
+async function buildAcademicPerformanceReport(reportType, filters = {}) {
+  const students = await listScopedStudents(filters.academicYear ? { _id: filters.academicYear } : null, null);
+  const insights = [];
+  for (const student of students.slice(0, 250)) {
+    insights.push(await buildStudentInsight(student, filters.academicYear));
+  }
+
+  if (filters.classRoom) {
+    const classStudents = await Student.find({
+      enrollments: { $elemMatch: { academicYear: filters.academicYear, classRoom: filters.classRoom, status: 'studying' } }
+    }).select('_id').lean();
+    const ids = new Set(classStudents.map((row) => String(row._id)));
+    insights.splice(0, insights.length, ...insights.filter((row) => ids.has(String(row.studentId))));
+  }
+
+  if (filters.performanceCategory) {
+    const category = String(filters.performanceCategory);
+    insights.splice(0, insights.length, ...insights.filter((row) => row.performanceBand.key === category));
+  }
+
+  const mapped = insights.map((row) => ({
+    admissionNumber: row.admissionNumber,
+    studentName: row.studentName,
+    performanceScore: row.performanceScore,
+    performanceCategory: row.performanceBand.label,
+    riskLevel: row.riskLevel.label,
+    attendancePercentage: row.attendance?.percentage || 0,
+    examAverage: row.examMetrics?.averageScore || 0,
+    feeStatus: row.fees?.status || '—'
+  }));
+
+  if (reportType === 'performance-summary') {
+    return mapped.sort((a, b) => b.performanceScore - a.performanceScore);
+  }
+  if (reportType === 'top-performers') {
+    return mapped
+      .filter((row) => row.performanceScore >= 70)
+      .sort((a, b) => b.performanceScore - a.performanceScore)
+      .slice(0, filters.limit ? Number(filters.limit) : 25);
+  }
+  if (reportType === 'weak-students') {
+    return mapped
+      .filter((row) => row.performanceScore < 50 || row.riskLevel === 'High Risk')
+      .sort((a, b) => a.performanceScore - b.performanceScore);
+  }
+
+  const error = new Error('Unknown academic performance report type');
+  error.status = HTTP_STATUS.BAD_REQUEST;
+  throw error;
+}
+
+async function buildStudentProgressReport(filters = {}) {
+  const match = { status: 'graded' };
+  if (filters.student) match.student = filters.student;
+  if (filters.academicYear) {
+    const classIds = await ClassRoom.find({ academicYear: filters.academicYear }).distinct('_id');
+    const studentIds = await Student.find({
+      enrollments: { $elemMatch: { academicYear: filters.academicYear, classRoom: { $in: classIds } } }
+    }).distinct('_id');
+    match.student = filters.student || { $in: studentIds };
+  }
+
+  const submissions = await ExamSubmission.find(match)
+    .populate('student', 'firstName lastName admissionNumber')
+    .sort({ submittedAt: 1 })
+    .lean();
+
+  const grouped = new Map();
+  for (const row of submissions) {
+    const key = String(row.student?._id || row.student);
+    const bucket = grouped.get(key) || {
+      admissionNumber: row.student?.admissionNumber || '',
+      studentName: studentLabel(row.student),
+      attempts: 0,
+      totalScore: 0,
+      latestScore: 0,
+      latestSubject: row.subject || '—',
+      latestDate: row.submittedAt
+    };
+    bucket.attempts += 1;
+    bucket.totalScore += row.percentage || 0;
+    bucket.latestScore = row.percentage || 0;
+    bucket.latestSubject = row.subject || bucket.latestSubject;
+    bucket.latestDate = row.submittedAt;
+    grouped.set(key, bucket);
+  }
+
+  return [...grouped.values()].map((row) => ({
+    ...row,
+    averageScore: row.attempts ? Math.round(row.totalScore / row.attempts) : 0
+  }));
 }
 
 async function buildFeeReport(reportType, filters = {}) {
@@ -217,7 +346,7 @@ async function buildFeeReport(reportType, filters = {}) {
     });
   }
 
-  if (reportType === 'pending') {
+  if (reportType === 'pending' || reportType === 'outstanding') {
     const invoiceFilter = { status: { $in: ['unpaid', 'partial'] } };
     if (filters.academicYear) invoiceFilter.academicYear = filters.academicYear;
     if (filters.classRoom) invoiceFilter.classRoom = filters.classRoom;
@@ -300,6 +429,46 @@ async function buildFeeReport(reportType, filters = {}) {
       }
     }
     return ledger.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+  }
+
+  if (reportType === 'discount-report') {
+    const invoiceFilter = { discount: { $gt: 0 }, status: { $ne: 'cancelled' } };
+    if (filters.academicYear) invoiceFilter.academicYear = filters.academicYear;
+    if (filters.month) invoiceFilter.feeMonth = Number(filters.month);
+    if (filters.year) invoiceFilter.feeYear = Number(filters.year);
+    const invoices = await FeeInvoice.find(invoiceFilter)
+      .populate('student', 'firstName lastName admissionNumber')
+      .populate('classRoom', 'name section')
+      .lean({ virtuals: true });
+    return invoices.map((invoice) => ({
+      studentName: studentLabel(invoice.student),
+      admissionNumber: invoice.student?.admissionNumber || '',
+      className: classLabel(invoice.classRoom),
+      feeMonth: `${invoice.feeMonth}/${invoice.feeYear}`,
+      discountAmount: invoice.discount || 0,
+      totalAmount: invoice.totalAmount,
+      status: invoice.status
+    }));
+  }
+
+  if (reportType === 'fine-collection') {
+    const invoiceFilter = { fine: { $gt: 0 }, status: { $ne: 'cancelled' } };
+    if (filters.academicYear) invoiceFilter.academicYear = filters.academicYear;
+    if (filters.month) invoiceFilter.feeMonth = Number(filters.month);
+    if (filters.year) invoiceFilter.feeYear = Number(filters.year);
+    const invoices = await FeeInvoice.find(invoiceFilter)
+      .populate('student', 'firstName lastName admissionNumber')
+      .populate('classRoom', 'name section')
+      .lean({ virtuals: true });
+    return invoices.map((invoice) => ({
+      studentName: studentLabel(invoice.student),
+      admissionNumber: invoice.student?.admissionNumber || '',
+      className: classLabel(invoice.classRoom),
+      feeMonth: `${invoice.feeMonth}/${invoice.feeYear}`,
+      fineAmount: invoice.fine || 0,
+      totalAmount: invoice.totalAmount,
+      status: invoice.status
+    }));
   }
 
   const error = new Error('Unknown fee report type');
@@ -421,20 +590,108 @@ async function buildTransportReport(reportType, filters = {}) {
   return enriched;
 }
 
+async function buildOperationsReport(reportType, filters = {}) {
+  if (reportType === 'teacher-register') {
+    const teachers = await Teacher.find({}).sort({ employeeCode: 1 }).lean();
+    return teachers.map((teacher) => ({
+      employeeCode: teacher.employeeCode,
+      teacherName: teacherLabel(teacher),
+      phone: teacher.phone || '—',
+      email: teacher.email || '—',
+      qualification: teacher.qualification || '—',
+      designation: teacherDesignation(teacher),
+      status: teacher.status || 'active',
+      baseSalary: teacher.baseSalary || 0
+    }));
+  }
+
+  if (reportType === 'bus-allocation') {
+    return buildTransportReport('route-wise', filters);
+  }
+
+  if (reportType === 'route-strength') {
+    return buildTransportReport('bus-strength', filters);
+  }
+
+  if (reportType === 'inactive-students') {
+    return buildStudentReport('inactive-students', { ...filters, status: filters.status || undefined });
+  }
+
+  if (reportType === 'user-activity') {
+    const match = {};
+    if (filters.date) {
+      const day = startOfDay(filters.date);
+      match.performedAt = { $gte: day, $lte: endOfDay(day) };
+    } else if (filters.month && filters.year) {
+      const start = new Date(Number(filters.year), Number(filters.month) - 1, 1);
+      const end = new Date(Number(filters.year), Number(filters.month), 0, 23, 59, 59, 999);
+      match.performedAt = { $gte: start, $lte: end };
+    }
+    const activities = await Activity.find(match).sort({ performedAt: -1 }).limit(500).lean();
+    return activities.map((row) => ({
+      module: row.module,
+      action: row.action,
+      description: row.description,
+      performedBy: row.performedBy?.email || row.performedBy?.name || '—',
+      role: row.performedBy?.role || '—',
+      performedAt: row.performedAt,
+      entityLabel: row.entityLabel || '—'
+    }));
+  }
+
+  if (reportType === 'audit-summary') {
+    const match = {};
+    if (filters.month && filters.year) {
+      const start = new Date(Number(filters.year), Number(filters.month) - 1, 1);
+      const end = new Date(Number(filters.year), Number(filters.month), 0, 23, 59, 59, 999);
+      match.performedAt = { $gte: start, $lte: end };
+    }
+    const activities = await Activity.find(match).select('module action performedAt').lean();
+    const grouped = new Map();
+    for (const row of activities) {
+      const key = `${row.module}:${row.action}`;
+      const bucket = grouped.get(key) || { module: row.module, action: row.action, count: 0 };
+      bucket.count += 1;
+      grouped.set(key, bucket);
+    }
+    return [...grouped.values()].sort((a, b) => b.count - a.count);
+  }
+
+  const error = new Error('Unknown operations report type');
+  error.status = HTTP_STATUS.BAD_REQUEST;
+  throw error;
+}
+
+async function buildAcademicReport(reportType, filters = {}) {
+  if (reportType === 'student-progress') {
+    return buildStudentProgressReport(filters);
+  }
+  return buildAcademicPerformanceReport(reportType, filters);
+}
+
 const DOMAIN_BUILDERS = {
   students: buildStudentReport,
+  academic: buildAcademicReport,
   fees: buildFeeReport,
   attendance: (type, filters) => attendanceService.buildReport(type, filters),
   payroll: buildPayrollReport,
-  transport: buildTransportReport
+  transport: buildTransportReport,
+  promotions: (type, filters) => promotionService.buildPromotionReport(
+    type === 'promotion-report' ? 'promoted' : type,
+    filters
+  ),
+  operations: buildOperationsReport
 };
 
 const VALID_TYPES = {
-  students: ['register', 'admission-register', 'class-wise', 'section-wise', 'status'],
-  fees: ['monthly-collection', 'pending', 'student-ledger', 'bus-fee-collection'],
-  attendance: ['daily', 'monthly', 'student-summary', 'class-summary'],
+  students: ['register', 'admission-register', 'class-register', 'class-wise', 'section-wise', 'status', 'inactive-students'],
+  academic: ['student-progress', 'performance-summary', 'top-performers', 'weak-students'],
+  fees: ['monthly-collection', 'pending', 'outstanding', 'student-ledger', 'bus-fee-collection', 'discount-report', 'fine-collection'],
+  attendance: ['daily', 'monthly', 'yearly', 'student-summary', 'class-summary', 'teacher-wise'],
   payroll: ['summary', 'salary-summary', 'payment-status'],
-  transport: ['route-wise', 'stop-wise', 'bus-strength', 'fee-collection']
+  transport: ['route-wise', 'stop-wise', 'bus-strength', 'fee-collection'],
+  promotions: ['promoted', 'detained', 'left-school', 'tc-issued', 'class-strength-comparison', 'promotion-report'],
+  operations: ['teacher-register', 'bus-allocation', 'route-strength', 'inactive-students', 'user-activity', 'audit-summary']
 };
 
 async function buildReport(domain, reportType, filters = {}) {
