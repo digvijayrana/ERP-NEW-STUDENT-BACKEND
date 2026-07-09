@@ -11,6 +11,7 @@ const {
   logStatusChange
 } = require('../services/activityLog.service');
 const { validateTeacherUniques, ensureTeacherCanDeactivate } = require('../services/integrity.service');
+const { applySalaryRevision } = require('../services/payroll.service');
 const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
@@ -22,7 +23,13 @@ const log = createLogger('teachers');
 exports.create = asyncHandler(async (req, res) => {
   await validateTeacherUniques(req.body);
 
-  const teacher = await Teacher.create({ ...req.body, ...auditOnCreate(req.user) });
+  const teacher = await Teacher.create({
+    ...req.body,
+    ...auditOnCreate(req.user),
+    salaryHistory: req.body.baseSalary != null
+      ? [{ basicSalary: Number(req.body.baseSalary), effectiveFrom: req.body.joiningDate || new Date() }]
+      : []
+  });
 
   logEntityCreate({
     module: MODULES.TEACHERS,
@@ -94,6 +101,19 @@ exports.update = asyncHandler(async (req, res) => {
       entityLabel: existing.employeeCode,
       user: req.user
     });
+  }
+
+  const salaryChanging =
+    req.body.baseSalary !== undefined && Number(req.body.baseSalary) !== Number(existing.baseSalary);
+  if (salaryChanging) {
+    await applySalaryRevision(
+      existing,
+      req.body.baseSalary,
+      req.body.salaryEffectiveFrom,
+      req.user
+    );
+    delete req.body.baseSalary;
+    delete req.body.salaryEffectiveFrom;
   }
 
   const teacher = await Teacher.findByIdAndUpdate(

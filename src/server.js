@@ -2,6 +2,7 @@ const app = require('./app');
 const connectDb = require('./config/db');
 const { createLogger } = require('./utils/logger');
 const { checkStorageHealth, getStorageInfo } = require('./services/documentStorage.service');
+const { autoGenerateCurrentMonthDemands } = require('./services/fee.service');
 const { DEFAULTS, FALLBACK_PORT_RETRIES } = require('./constants');
 
 const log = createLogger('server');
@@ -32,6 +33,13 @@ async function startServer(portToUse) {
       log.info(`Student ERP API is running`, {
         url: `http://${host}:${portToUse}`,
         env: process.env.NODE_ENV || DEFAULTS.NODE_ENV
+      });
+
+      setImmediate(async () => {
+        const feeResult = await autoGenerateCurrentMonthDemands();
+        if (feeResult.created > 0) {
+          log.info('Auto-generated monthly fee demands', feeResult);
+        }
       });
     });
 

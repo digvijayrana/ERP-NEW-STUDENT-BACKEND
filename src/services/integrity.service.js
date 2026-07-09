@@ -196,16 +196,56 @@ async function ensureTeacherCanDeactivate(teacherId, audit) {
   }
 }
 
+function assertLockedReceiptEditable(payment, audit) {
+  if (payment?.locked && payment.status !== 'void') {
+    if (audit) {
+      logIntegrityFailure({
+        module: audit.module || 'fees',
+        entityId: audit.entityId,
+        entityLabel: payment.receiptNumber,
+        rule: 'LOCKED_RECEIPT',
+        message: 'Locked fee receipts cannot be modified',
+        user: audit.user,
+        details: { receiptNumber: payment.receiptNumber }
+      });
+    }
+    throw integrityError('Locked fee receipts cannot be modified', 'LOCKED_RECORD');
+  }
+}
+
+function assertHistoricalRegistrationImmutable(registration, audit) {
+  if (registration.historicalLocked || (registration.status === 'inactive' && registration.serviceEndDate)) {
+    const end = registration.serviceEndDate ? new Date(registration.serviceEndDate) : null;
+    const isPast = end && end < new Date();
+    if (registration.historicalLocked || isPast) {
+      if (audit) {
+        logIntegrityFailure({
+          module: audit.module || 'transport',
+          entityId: registration._id,
+          entityLabel: audit.entityLabel,
+          rule: 'HISTORICAL_BUS_REGISTRATION',
+          message: 'Historical bus assignments cannot be modified',
+          user: audit.user
+        });
+      }
+      throw integrityError('Historical bus assignments cannot be modified. Create a new assignment instead.', 'HISTORICAL_RECORD');
+    }
+  }
+}
+
 module.exports = {
   INTEGRITY_CODE,
   DEPENDENCY_CODE,
   integrityError,
   logIntegrityFailure,
+  throwWithAudit,
   countStudentsInClass,
   ensureAcademicYearEditable,
   ensureUniqueClassCombination,
   ensureClassCapacityNotBelowEnrollment,
   ensureClassHasNoEnrolledStudents,
   validateTeacherUniques,
-  ensureTeacherCanDeactivate
+  ensureTeacherCanDeactivate,
+  assertLockedReceiptEditable,
+  assertHistoricalRegistrationImmutable
 };

@@ -1,6 +1,17 @@
 const mongoose = require('mongoose');
 const { auditFieldSchema } = require('../utils/auditFields');
 
+const salaryHistorySchema = new mongoose.Schema(
+  {
+    basicSalary: { type: Number, required: true, min: 0 },
+    effectiveFrom: { type: Date, required: true },
+    effectiveTo: Date,
+    recordedAt: { type: Date, default: Date.now },
+    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+  },
+  { _id: true }
+);
+
 const teacherSchema = new mongoose.Schema(
   {
     employeeCode: { type: String, required: true, unique: true, trim: true },
@@ -21,6 +32,7 @@ const teacherSchema = new mongoose.Schema(
     qualification: { type: String, trim: true },
     joiningDate: { type: Date, default: Date.now },
     baseSalary: { type: Number, required: true, min: 0 },
+    salaryHistory: [salaryHistorySchema],
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     address: {
       line1: String,

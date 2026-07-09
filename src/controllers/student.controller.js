@@ -17,6 +17,7 @@ const {
 } = require('../services/activityLog.service');
 const { MODULES } = require('../constants/activityActions');
 const { countStudentsInClass } = require('./classRoom.controller');
+const { generateAdmissionDemand } = require('./fee.controller');
 const { createLogger } = require('../utils/logger');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
@@ -157,6 +158,8 @@ exports.createAdmission = asyncHandler(async (req, res) => {
     user: req.user.email
   });
 
+  await generateAdmissionDemand(createdStudent, academicYearId, payload.classRoom, req.user);
+
   res.status(HTTP_STATUS.CREATED).json({
     ...createdStudent.toObject(),
     assignedClass: { name: classRoom.name, section: classRoom.section },
@@ -244,6 +247,10 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
+  if (req.user.role === 'student' || req.user.role === 'parent') {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'You do not have permission to edit student records' });
+  }
+
   const existing = await Student.findById(req.params.id);
   if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { auditFieldSchema } = require('../utils/auditFields');
 
 const payrollSchema = new mongoose.Schema(
   {
@@ -8,10 +9,17 @@ const payrollSchema = new mongoose.Schema(
     basicSalary: { type: Number, required: true, min: 0 },
     allowances: { type: Number, default: 0, min: 0 },
     deductions: { type: Number, default: 0, min: 0 },
+    salaryEffectiveSnapshot: { type: Number, min: 0 },
     paidAt: Date,
     paymentMode: { type: String, enum: ['cash', 'bank_transfer', 'upi', 'cheque'], default: 'bank_transfer' },
     status: { type: String, enum: ['pending', 'paid'], default: 'pending' },
-    remarks: String
+    locked: { type: Boolean, default: false },
+    lockedAt: Date,
+    lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    unlockedAt: Date,
+    unlockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    remarks: String,
+    ...auditFieldSchema
   },
   { timestamps: true }
 );

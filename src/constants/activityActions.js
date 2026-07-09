@@ -5,7 +5,12 @@ module.exports = {
     CLASSES: 'classes',
     ACADEMIC_YEARS: 'academic_years',
     ROLES: 'roles',
-    USERS: 'users'
+    USERS: 'users',
+    FEES: 'fees',
+    TRANSPORT: 'transport',
+    ATTENDANCE: 'attendance',
+    PAYROLL: 'payroll',
+    REPORTS: 'reports'
   },
 
   ACTIONS: {
@@ -24,6 +29,10 @@ module.exports = {
     INTEGRITY_VIOLATION: 'integrity_violation',
     DOCUMENT_UPLOAD: 'document_upload',
     DOCUMENT_REPLACE: 'document_replace',
-    DOCUMENT_DELETE: 'document_delete'
+    DOCUMENT_DELETE: 'document_delete',
+    LOCK: 'lock',
+    UNLOCK: 'unlock',
+    RECORD_LOCK: 'record_lock',
+    RECORD_UNLOCK: 'record_unlock'
   }
 };

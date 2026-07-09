@@ -306,6 +306,64 @@ exports.feeInvoicePdf = function feeInvoicePdf(res, invoice) {
   });
 };
 
+const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+exports.feeReceiptPdf = function feeReceiptPdf(res, invoice, payment) {
+  const monthLabel = MONTHS[invoice.feeMonth] || invoice.feeMonth;
+  pipePdf(res, `${payment.receiptNumber}.pdf`, (doc) => {
+    headerBlock(doc);
+
+    if (payment.status === 'void') watermark(doc, 'Void');
+
+    docTitle(doc, 'Fee Receipt', `Receipt No: ${payment.receiptNumber}  |  Date: ${fmtDate(payment.paidAt || new Date())}`);
+
+    const bx = doc.y;
+    const bw = (W - 12) / 3;
+    infoBox(doc, 'Student Name', `${invoice.student?.firstName || ''} ${invoice.student?.lastName || ''}`.trim(), LEFT, bx, bw);
+    infoBox(doc, 'Admission No', invoice.student?.admissionNumber || '', LEFT + bw + 6, bx, bw);
+    infoBox(doc, 'Class / Section', `${invoice.classRoom?.name || ''}-${invoice.classRoom?.section || ''}`, LEFT + (bw + 6) * 2, bx, bw);
+
+    const bx2 = bx + 42;
+    infoBox(doc, 'Academic Year', invoice.academicYear?.name || '', LEFT, bx2, bw);
+    infoBox(doc, 'Fee Month', `${monthLabel} ${invoice.feeYear}`, LEFT + bw + 6, bx2, bw);
+    infoBox(doc, 'Payment Mode', (payment.mode || 'cash').toUpperCase(), LEFT + (bw + 6) * 2, bx2, bw);
+
+    doc.y = bx2 + 50;
+
+    const descCol = { x: LEFT + 14, w: W - 140, label: 'Description' };
+    const amtCol = { x: LEFT + 14, w: W - 28, label: 'Amount', align: 'right' };
+    let y = tableHeader(doc, [descCol, amtCol], doc.y);
+
+    const rows = [
+      ['Tuition Fee', invoice.tuitionFee],
+      ['Bus Fee', invoice.busFee],
+      ['Other Charges', invoice.otherCharges],
+      ['Previous Pending', invoice.previousPending],
+      ['Discount', invoice.discount ? -invoice.discount : 0],
+      ['Fine', invoice.fine]
+    ].filter(([, amount]) => amount);
+
+    rows.forEach(([label, amount], i) => {
+      y = tableDataRow(doc, [
+        { text: label, x: LEFT + 14, w: W - 140 },
+        { text: amount < 0 ? `- ${rupees(Math.abs(amount))}` : rupees(amount), x: LEFT + 14, w: W - 28, align: 'right' }
+      ], y, { striped: i % 2 === 0 });
+    });
+
+    y = totalBand(doc, 'TOTAL PAID', rupees(payment.amount), y + 2);
+    if (payment.referenceNumber) {
+      y = summaryRow(doc, 'Reference No', payment.referenceNumber, y, { color: C.MUTED });
+    }
+    if (payment.status === 'void') {
+      statusPill(doc, 'void', RIGHT - 90, y + 4);
+    } else {
+      statusPill(doc, 'paid', RIGHT - 90, y + 4);
+    }
+
+    footerBlock(doc);
+  });
+};
+
 exports.payrollPdf = function payrollPdf(res, payroll) {
   const months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const period = `${months[payroll.month] || payroll.month} ${payroll.year}`;
@@ -368,4 +426,235 @@ exports.payrollPdf = function payrollPdf(res, payroll) {
 
     footerBlock(doc);
   });
+};
+
+const REPORT_TITLES = {
+  'route-wise': 'Route-wise Bus Students',
+  'stop-wise': 'Stop-wise Bus Students',
+  'fee-collection': 'Bus Fee Collection Report',
+  active: 'Active Bus Students',
+  inactive: 'Inactive Bus Students'
+};
+
+exports.transportReportPdf = function transportReportPdf(res, reportType, rows) {
+  const title = REPORT_TITLES[reportType] || 'Transport Report';
+  const headers = reportType === 'fee-collection'
+    ? ['Student', 'Month', 'Bus Fee', 'Paid', 'Receipt', 'Date']
+    : ['Student', 'Class', 'Route', 'Stop', 'Fee', 'Status'];
+  const colW = W / headers.length;
+
+  pipePdf(res, `transport-${reportType}.pdf`, (doc) => {
+    headerBlock(doc);
+    docTitle(doc, title, `Generated on ${fmtDate(new Date())}`);
+
+    const headerCols = headers.map((label, index) => ({
+      x: LEFT + 8 + index * colW,
+      w: colW - 8,
+      label
+    }));
+    let y = tableHeader(doc, headerCols, doc.y);
+
+    for (const row of rows) {
+      const cells = reportType === 'fee-collection'
+        ? [
+            row.studentName || '—',
+            row.feeMonth || '—',
+            rupees(row.busFee),
+            rupees(row.paidAmount),
+            row.receiptNumber || '—',
+            fmtDate(row.paymentDate)
+          ]
+        : [
+            row.studentName || '—',
+            row.className || '—',
+            row.routeName || '—',
+            row.stopName || '—',
+            rupees(row.monthlyFee),
+            row.busService && row.status === 'active' ? 'Active' : 'Inactive'
+          ];
+      y = tableDataRow(
+        doc,
+        cells.map((text, index) => ({ text: String(text), x: LEFT + 8 + index * colW, w: colW - 8 })),
+        y,
+        { striped: true }
+      );
+      if (y > PAGE_H - 80) {
+        doc.addPage();
+        y = M + 20;
+      }
+    }
+
+    footerBlock(doc);
+  });
+};
+
+const ATTENDANCE_REPORT_TITLES = {
+  daily: 'Daily Attendance Report',
+  monthly: 'Monthly Attendance Report',
+  'student-summary': 'Student Attendance Summary',
+  'class-summary': 'Class Attendance Summary'
+};
+
+exports.attendanceReportPdf = function attendanceReportPdf(res, reportType, rows) {
+  const title = ATTENDANCE_REPORT_TITLES[reportType] || 'Attendance Report';
+  const headers = reportType === 'daily'
+    ? ['Date', 'Student', 'Class', 'Status', 'Remarks']
+    : reportType === 'monthly' || reportType === 'student-summary'
+      ? ['Student', 'Class', 'Month', 'Present', 'Absent', 'Leave', '%']
+      : ['Class', 'Students', 'Present', 'Absent', 'Leave', '%'];
+  const colW = W / headers.length;
+
+  pipePdf(res, `attendance-${reportType}.pdf`, (doc) => {
+    headerBlock(doc);
+    docTitle(doc, title, `Generated on ${fmtDate(new Date())}`);
+
+    const headerCols = headers.map((label, index) => ({
+      x: LEFT + 8 + index * colW,
+      w: colW - 8,
+      label
+    }));
+    let y = tableHeader(doc, headerCols, doc.y);
+
+    for (const row of rows) {
+      let cells = [];
+      if (reportType === 'daily') {
+        cells = [fmtDate(row.date), row.studentName || '—', row.className || '—', row.status || '—', row.remarks || '—'];
+      } else if (reportType === 'class-summary') {
+        cells = [row.className || '—', String(row.studentCount || 0), String(row.present || 0), String(row.absent || 0), String(row.leave || 0), `${row.percentage || 0}%`];
+      } else {
+        cells = [row.studentName || '—', row.className || '—', row.month || '—', String(row.present || 0), String(row.absent || 0), String(row.leave || 0), `${row.percentage || 0}%`];
+      }
+      y = tableDataRow(
+        doc,
+        cells.map((text, index) => ({ text: String(text), x: LEFT + 8 + index * colW, w: colW - 8 })),
+        y,
+        { striped: true }
+      );
+      if (y > PAGE_H - 80) {
+        doc.addPage();
+        y = M + 20;
+      }
+    }
+
+    footerBlock(doc);
+  });
+};
+
+const MODULE_REPORT_CONFIG = {
+  students: {
+    register: {
+      title: 'Student Register',
+      headers: ['Adm No', 'Name', 'Class', 'Section', 'Status', 'Admission Date'],
+      map: (row) => [row.admissionNumber, row.studentName, row.className, row.section, row.status, fmtDate(row.admissionDate)]
+    },
+    'admission-register': {
+      title: 'Admission Register',
+      headers: ['Adm No', 'Name', 'Class', 'Admission Date', 'Status'],
+      map: (row) => [row.admissionNumber, row.studentName, row.classSection, fmtDate(row.admissionDate), row.status]
+    },
+    'class-wise': {
+      title: 'Class-wise Student Report',
+      headers: ['Class', 'Total', 'Active', 'Inactive'],
+      map: (row) => [row.className, String(row.totalStudents), String(row.activeStudents), String(row.inactiveStudents)]
+    },
+    'section-wise': {
+      title: 'Section-wise Student Report',
+      headers: ['Class-Section', 'Total', 'Active'],
+      map: (row) => [row.classSection, String(row.totalStudents), String(row.activeStudents)]
+    },
+    status: {
+      title: 'Student Status Report',
+      headers: ['Status', 'Total Students'],
+      map: (row) => [row.status, String(row.totalStudents)]
+    }
+  },
+  fees: {
+    'monthly-collection': {
+      title: 'Monthly Fee Collection Report',
+      headers: ['Student', 'Class', 'Month', 'Paid', 'Receipt', 'Status'],
+      map: (row) => [row.studentName, row.className, row.feeMonth, rupees(row.paidAmount), row.receiptNumber || '—', row.status]
+    },
+    pending: {
+      title: 'Pending Fee Report',
+      headers: ['Student', 'Class', 'Month', 'Due', 'Pending', 'Status'],
+      map: (row) => [row.studentName, row.className, row.feeMonth, fmtDate(row.dueDate), rupees(row.pendingAmount), row.status]
+    },
+    'student-ledger': {
+      title: 'Student Fee Ledger',
+      headers: ['Date', 'Student', 'Type', 'Description', 'Debit', 'Credit'],
+      map: (row) => [fmtDate(row.date), row.studentName, row.entryType, row.description, rupees(row.debit), rupees(row.credit)]
+    },
+    'bus-fee-collection': {
+      title: 'Bus Fee Collection Report',
+      headers: ['Student', 'Month', 'Bus Fee', 'Paid', 'Receipt', 'Date'],
+      map: (row) => [row.studentName, row.feeMonth, rupees(row.busFee), rupees(row.paidAmount), row.receiptNumber || '—', fmtDate(row.paymentDate)]
+    }
+  },
+  payroll: {
+    summary: {
+      title: 'Payroll Summary',
+      headers: ['Month', 'Employees', 'Paid', 'Pending', 'Net Total'],
+      map: (row) => [row.payrollMonth, String(row.employeeCount), String(row.paidCount), String(row.pendingCount), rupees(row.totalNet)]
+    },
+    'salary-summary': {
+      title: 'Salary Summary',
+      headers: ['Employee', 'Designation', 'Basic', 'Allowances', 'Deductions', 'Net', 'Status'],
+      map: (row) => [row.teacherName, row.designation, rupees(row.basicSalary), rupees(row.allowances), rupees(row.deductions), rupees(row.netSalary), row.status]
+    },
+    'payment-status': {
+      title: 'Payroll Payment Status',
+      headers: ['Employee', 'Month', 'Net Salary', 'Status', 'Paid On'],
+      map: (row) => [row.teacherName, row.payrollMonth, rupees(row.netSalary), row.status, fmtDate(row.paidAt)]
+    }
+  },
+  transport: {
+    'bus-strength': {
+      title: 'Bus Strength Report',
+      headers: ['Route', 'Vehicle', 'Capacity', 'Students', 'Available', 'Occupancy'],
+      map: (row) => [row.routeName, row.vehicleNumber, String(row.capacity), String(row.activeStudents), String(row.availableSeats), `${row.occupancy}%`]
+    }
+  }
+};
+
+function genericTablePdf(res, filename, title, headers, rows, mapRow) {
+  const colW = W / headers.length;
+  pipePdf(res, filename, (doc) => {
+    headerBlock(doc);
+    docTitle(doc, title, `Generated on ${fmtDate(new Date())}`);
+    const headerCols = headers.map((label, index) => ({
+      x: LEFT + 8 + index * colW,
+      w: colW - 8,
+      label
+    }));
+    let y = tableHeader(doc, headerCols, doc.y);
+    for (const row of rows) {
+      const cells = mapRow(row);
+      y = tableDataRow(
+        doc,
+        cells.map((text, index) => ({ text: String(text), x: LEFT + 8 + index * colW, w: colW - 8 })),
+        y,
+        { striped: true }
+      );
+      if (y > PAGE_H - 80) {
+        doc.addPage();
+        y = M + 20;
+      }
+    }
+    footerBlock(doc);
+  });
+}
+
+exports.moduleReportPdf = function moduleReportPdf(res, domain, reportType, rows) {
+  if (domain === 'attendance') {
+    return exports.attendanceReportPdf(res, reportType, rows);
+  }
+  if (domain === 'transport' && reportType !== 'bus-strength') {
+    return exports.transportReportPdf(res, reportType, rows);
+  }
+
+  const config = MODULE_REPORT_CONFIG[domain]?.[reportType];
+  if (!config) {
+    return genericTablePdf(res, `${domain}-${reportType}.pdf`, `${domain} ${reportType}`, ['Data'], rows, (row) => [JSON.stringify(row)]);
+  }
+  return genericTablePdf(res, `${domain}-${reportType}.pdf`, config.title, config.headers, rows, config.map);
 };

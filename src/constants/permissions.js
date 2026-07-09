@@ -57,7 +57,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       timetable: { view: true, create: true, edit: true },
       exams: { view: true, create: true, edit: true, approve: true },
       reports: { view: true, export: true },
-      transport: { view: true }
+      transport: { view: true, create: true, edit: true, deactivate: true, export: true }
     })
   },
   teacher: {
@@ -81,7 +81,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       academic_year: { view: true },
       classes: { view: true },
       students: { view: true, create: true, edit: true, export: true },
-      teachers: { view: true }
+      teachers: { view: true },
+      transport: { view: true, create: true, edit: true }
     })
   },
   accountant: {
@@ -92,7 +93,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       students: { view: true, export: true },
       fees: { view: true, create: true, edit: true, export: true },
       payroll: { view: true, export: true },
-      reports: { view: true, export: true }
+      reports: { view: true, export: true },
+      transport: { view: true, export: true }
     })
   },
   parent: {
@@ -116,7 +118,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       attendance: { view: true },
       fees: { view: true },
       timetable: { view: true },
-      exams: { view: true, create: true }
+      exams: { view: true }
     })
   }
 };

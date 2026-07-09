@@ -1,4 +1,3 @@
-const Attendance = require('../models/Attendance');
 const ClassRoom = require('../models/ClassRoom');
 const ExamSubmission = require('../models/ExamSubmission');
 const FeeInvoice = require('../models/FeeInvoice');
@@ -6,6 +5,12 @@ const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { analyzeStudentProfile } = require('../services/aiStudentInsight.service');
+const {
+  buildTransportCard,
+  buildAttendanceCard,
+  buildFeeSummary,
+  buildActivityTimeline
+} = require('../services/studentProfile.service');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 
 const log = createLogger('students');
@@ -73,14 +78,17 @@ exports.getProfile = asyncHandler(async (req, res) => {
 
   const latestEnrollment = student.enrollments?.filter((e) => e.status === 'studying').pop()
     || student.enrollments?.[student.enrollments.length - 1];
+  const academicYearId = latestEnrollment?.academicYear?._id || latestEnrollment?.academicYear;
+  const classRoomId = latestEnrollment?.classRoom?._id || latestEnrollment?.classRoom;
 
-  const [attendanceRecords, examSubmissions, feeInvoices, classMates] = await Promise.all([
-    Attendance.find({ student: student._id }).sort({ date: -1 }).limit(PAGINATION.MAX_RECENT_ATTENDANCE).lean(),
+  const [examSubmissions, feeInvoices, classMates, attendance, transport] = await Promise.all([
     ExamSubmission.find({ student: student._id, status: 'graded' })
       .populate({ path: 'exam', select: 'title subject chapter totalMarks classRoom', populate: { path: 'classRoom', select: 'name section' } })
       .sort({ submittedAt: -1 })
       .lean(),
-    FeeInvoice.find({ student: student._id }).lean({ virtuals: true }),
+    FeeInvoice.find({ student: student._id, ...(academicYearId ? { academicYear: academicYearId } : {}) })
+      .sort({ feeYear: -1, feeMonth: -1, dueDate: -1 })
+      .lean({ virtuals: true }),
     latestEnrollment?.classRoom
       ? Student.find({
           _id: { $ne: student._id },
@@ -88,13 +96,15 @@ exports.getProfile = asyncHandler(async (req, res) => {
           'enrollments.status': 'studying',
           status: 'active'
         }).select('_id').lean()
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    buildAttendanceCard(student._id, academicYearId),
+    buildTransportCard(student, academicYearId)
   ]);
 
-  const totalAttendance = attendanceRecords.length;
-  const present = attendanceRecords.filter((r) => ['present', 'late', 'half_day'].includes(r.status)).length;
-  const absent = attendanceRecords.filter((r) => r.status === 'absent').length;
-  const attendancePercentage = totalAttendance ? Math.round((present / totalAttendance) * PERCENTAGE_MULTIPLIER) : PERCENTAGE_MULTIPLIER;
+  const [fees, activityTimeline] = await Promise.all([
+    buildFeeSummary(student, academicYearId, classRoomId, feeInvoices),
+    buildActivityTimeline(student, feeInvoices, academicYearId)
+  ]);
 
   const examResults = examSubmissions.map((s) => ({
     examId: s.exam?._id,
@@ -126,25 +136,8 @@ exports.getProfile = asyncHandler(async (req, res) => {
     attempts: data.count
   }));
 
-  const totalFeeDue = feeInvoices.reduce((sum, inv) => sum + (inv.balanceAmount || 0), 0);
-  const totalFeePaid = feeInvoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
-  const feeStatus = totalFeeDue <= 0 ? 'paid' : feeInvoices.some((i) => i.status === 'partial') ? 'partial' : 'unpaid';
-
   const photoDoc = student.documents?.find((d) => d.type === 'photo');
   const docStatus = mandatoryDocumentStatus(student.documents);
-
-  const activityTimeline = (student.activityLog || [])
-    .slice()
-    .sort((a, b) => new Date(b.performedAt) - new Date(a.performedAt))
-    .map((entry) => ({
-      action: entry.action,
-      description: entry.description,
-      performedBy: entry.performedBy,
-      performedAt: entry.performedAt,
-      previousStatus: entry.meta?.previousStatus,
-      newStatus: entry.meta?.newStatus,
-      remarks: entry.meta?.remarks
-    }));
 
   const profilePayload = {
     student: {
@@ -194,13 +187,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
     },
     profileCompletion: computeProfileCompletion(student, latestEnrollment),
     activityTimeline,
-    attendance: {
-      percentage: attendancePercentage,
-      present,
-      absent,
-      total: totalAttendance,
-      recent: attendanceRecords.slice(0, PAGINATION.MAX_RECENT_ITEMS).map((r) => ({ date: r.date, status: r.status }))
-    },
+    attendance,
     academics: {
       averageScore,
       examCount: examResults.length,
@@ -211,26 +198,11 @@ exports.getProfile = asyncHandler(async (req, res) => {
         score: e.percentage
       }))
     },
-    fees: {
-      status: feeStatus,
-      totalDue: totalFeeDue,
-      totalPaid: totalFeePaid,
-      invoices: feeInvoices.slice(0, PAGINATION.MAX_FEE_INVOICES).map((inv) => ({
-        invoiceNumber: inv.invoiceNumber,
-        status: inv.status,
-        balanceAmount: inv.balanceAmount,
-        totalAmount: inv.totalAmount,
-        dueDate: inv.dueDate
-      }))
-    },
-    transport: {
-      route: 'Not assigned',
-      busNumber: '—',
-      pickupPoint: student.address?.line1 || '—'
-    },
+    fees,
+    transport,
     behavior: {
-      score: attendancePercentage >= 90 && averageScore >= 75 ? 'Excellent' : attendancePercentage >= 75 ? 'Good' : 'Needs attention',
-      remarks: attendancePercentage < 75 ? 'Low attendance may affect learning outcomes' : 'Regular attendance maintained'
+      score: attendance.percentage >= 90 && averageScore >= 75 ? 'Excellent' : attendance.percentage >= 75 ? 'Good' : 'Needs attention',
+      remarks: attendance.percentage < 75 ? 'Low attendance may affect learning outcomes' : 'Regular attendance maintained'
     }
   };
 

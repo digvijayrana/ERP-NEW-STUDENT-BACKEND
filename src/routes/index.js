@@ -17,5 +17,7 @@ router.use('/attendance', require('./attendance.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/timetable', require('./timetable.routes'));
 router.use('/exams', require('./exam.routes'));
+router.use('/transport', require('./transport.routes'));
+router.use('/reports', require('./report.routes'));
 
 module.exports = router;

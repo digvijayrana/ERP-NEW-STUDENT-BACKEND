@@ -19,7 +19,26 @@ function parseSortQuery(query, allowedFields, defaultField = 'createdAt') {
 }
 
 function duplicateKeyField(err) {
-  const key = err?.keyPattern ? Object.keys(err.keyPattern)[0] : err?.keyValue ? Object.keys(err.keyValue)[0] : null;
+  const keyPattern = err?.keyPattern || {};
+  const keys = Object.keys(keyPattern);
+
+  if (keys.includes('teacher') && keys.includes('month') && keys.includes('year')) {
+    return 'A payroll record already exists for this teacher in the selected month';
+  }
+  if (keys.includes('student') && keys.includes('date')) {
+    return 'Attendance already exists for this student on the selected date';
+  }
+  if (keys.includes('student') && keys.includes('academicYear') && keys.includes('feeMonth')) {
+    return 'A fee demand already exists for this student and period';
+  }
+  if (keys.includes('student') && keys.includes('academicYear') && keyPattern.busService) {
+    return 'Student already has an active bus registration for this academic year';
+  }
+  if (keys.includes('academicYear') && keys.includes('classRoom') && keys.includes('date')) {
+    return 'An attendance register already exists for this class and date';
+  }
+
+  const key = keys[0] || (err?.keyValue ? Object.keys(err.keyValue)[0] : null);
   const labels = {
     name: 'Name',
     email: 'Email',
@@ -28,9 +47,11 @@ function duplicateKeyField(err) {
     aadhaarNumber: 'Aadhaar number',
     udisePenId: 'UDISE/PEN ID',
     phone: 'Phone number',
-    slug: 'Role slug'
+    slug: 'Role slug',
+    invoiceNumber: 'Invoice number',
+    receiptNumber: 'Receipt number'
   };
-  if (key === 'name' && err?.keyPattern?.section) return 'Class and section already exist for this academic year';
+  if (key === 'name' && keyPattern.section) return 'Class and section already exist for this academic year';
   return labels[key] ? `${labels[key]} already exists` : 'Duplicate record found';
 }
 

@@ -19,3 +19,8 @@ exports.nextInvoiceNumber = function nextInvoiceNumber() {
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   return nextSequence(`invoice-${stamp}`, `INV-${stamp}-`, 5);
 };
+
+exports.nextReceiptNumber = function nextReceiptNumber() {
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return nextSequence(`receipt-${stamp}`, `RCP-${stamp}-`, 5);
+};

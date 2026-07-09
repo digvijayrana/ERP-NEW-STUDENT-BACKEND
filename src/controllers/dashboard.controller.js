@@ -3,6 +3,10 @@ const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const Teacher = require('../models/Teacher');
 const Activity = require('../models/Activity');
+const Attendance = require('../models/Attendance');
+const FeeInvoice = require('../models/FeeInvoice');
+const BusRegistration = require('../models/BusRegistration');
+const Payroll = require('../models/Payroll');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { ACTIONS } = require('../constants/activityActions');
@@ -11,6 +15,7 @@ const { ROLES } = require('../constants');
 const log = createLogger('dashboard');
 const MANDATORY_DOC_TYPES = ['photo', 'birth_certificate'];
 const RECENT_ACTIVITY_LIMIT = 20;
+const PRESENT_STATUSES = new Set(['present', 'late', 'half_day']);
 
 const ACTION_TYPE_MAP = {
   [ACTIONS.ADMISSION]: 'student_admission',
@@ -155,6 +160,103 @@ async function buildRecentActivities(limit = RECENT_ACTIVITY_LIMIT) {
   return buildRecentActivitiesFromStore(limit);
 }
 
+function studentLabel(student) {
+  if (!student) return '';
+  return [student.firstName, student.lastName].filter(Boolean).join(' ');
+}
+
+async function buildOperationalAnalytics(activeYear) {
+  const todayStart = startOfToday();
+  const todayEnd = endOfToday();
+  const now = new Date();
+  const payrollMonth = now.getMonth() + 1;
+  const payrollYear = now.getFullYear();
+
+  const [
+    todayAttendanceRecords,
+    feeInvoices,
+    busStudents,
+    payrollRecords,
+    recentPayments
+  ] = await Promise.all([
+    Attendance.find({ date: { $gte: todayStart, $lte: todayEnd } }).select('status').lean(),
+    FeeInvoice.find({ status: { $ne: 'cancelled' } })
+      .populate('student', 'firstName lastName admissionNumber')
+      .lean({ virtuals: true }),
+    BusRegistration.countDocuments({
+      status: 'active',
+      busService: true,
+      ...(activeYear ? { academicYear: activeYear._id } : {})
+    }),
+    Payroll.find({ month: payrollMonth, year: payrollYear }).lean({ virtuals: true }),
+    FeeInvoice.find({ status: { $ne: 'cancelled' }, 'payments.0': { $exists: true } })
+      .populate('student', 'firstName lastName admissionNumber')
+      .sort({ updatedAt: -1 })
+      .limit(40)
+      .lean({ virtuals: true })
+  ]);
+
+  const todaysAttendance = {
+    present: todayAttendanceRecords.filter((row) => PRESENT_STATUSES.has(row.status)).length,
+    absent: todayAttendanceRecords.filter((row) => row.status === 'absent').length,
+    leave: todayAttendanceRecords.filter((row) => row.status === 'leave').length,
+    total: todayAttendanceRecords.length
+  };
+
+  let todaysFeeCollection = 0;
+  let pendingFees = 0;
+  for (const invoice of feeInvoices) {
+    pendingFees += invoice.balanceAmount || 0;
+    for (const payment of invoice.payments || []) {
+      if (payment.status === 'void' || !payment.paidAt) continue;
+      const paidAt = new Date(payment.paidAt);
+      if (paidAt >= todayStart && paidAt <= todayEnd) {
+        todaysFeeCollection += payment.amount || 0;
+      }
+    }
+  }
+
+  const payrollStatus = {
+    month: payrollMonth,
+    year: payrollYear,
+    total: payrollRecords.length,
+    paid: payrollRecords.filter((row) => row.status === 'paid').length,
+    pending: payrollRecords.filter((row) => row.status === 'pending').length,
+    paidAmount: payrollRecords
+      .filter((row) => row.status === 'paid')
+      .reduce((sum, row) => sum + (row.netSalary || 0), 0),
+    pendingAmount: payrollRecords
+      .filter((row) => row.status === 'pending')
+      .reduce((sum, row) => sum + (row.netSalary || 0), 0)
+  };
+
+  const recentFeeCollections = [];
+  for (const invoice of recentPayments) {
+    for (const payment of (invoice.payments || []).filter((row) => row.status !== 'void')) {
+      recentFeeCollections.push({
+        studentName: studentLabel(invoice.student),
+        admissionNumber: invoice.student?.admissionNumber || '',
+        amount: payment.amount,
+        receiptNumber: payment.receiptNumber,
+        paidAt: payment.paidAt,
+        mode: payment.mode,
+        feeMonth: `${invoice.feeMonth}/${invoice.feeYear}`
+      });
+    }
+  }
+
+  recentFeeCollections.sort((a, b) => new Date(b.paidAt || 0) - new Date(a.paidAt || 0));
+
+  return {
+    todaysAttendance,
+    todaysFeeCollection,
+    pendingFees,
+    busStudents,
+    payrollStatus,
+    recentFeeCollections: recentFeeCollections.slice(0, 10)
+  };
+}
+
 async function buildAdminDashboard(activeYear) {
   const classFilter = activeYear ? { academicYear: activeYear._id } : {};
   const todayStart = startOfToday();
@@ -169,7 +271,8 @@ async function buildAdminDashboard(activeYear) {
     distinctClassNames,
     todaysAdmissions,
     pendingDocuments,
-    recentActivities
+    recentActivities,
+    operationalAnalytics
   ] = await Promise.all([
     Student.countDocuments({}),
     Student.countDocuments({ status: 'active' }),
@@ -179,7 +282,8 @@ async function buildAdminDashboard(activeYear) {
     ClassRoom.distinct('name', classFilter),
     Student.countDocuments({ admissionDate: { $gte: todayStart, $lte: todayEnd } }),
     Student.countDocuments(missingMandatoryDocsFilter()),
-    buildRecentActivities()
+    buildRecentActivities(),
+    buildOperationalAnalytics(activeYear)
   ]);
 
   return {
@@ -193,6 +297,7 @@ async function buildAdminDashboard(activeYear) {
     todaysAdmissions,
     pendingDocuments,
     recentActivities,
+    operational: operationalAnalytics,
     students: totalStudents,
     teachers: totalTeachers
   };

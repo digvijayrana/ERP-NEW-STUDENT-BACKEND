@@ -6,6 +6,7 @@ router.get('/', controller.list);
 router.patch('/:id', controller.update);
 router.delete('/:id', controller.remove);
 router.post('/:id/mark-paid', controller.markPaid);
+router.post('/:id/unlock', controller.unlock);
 router.get('/:id/pdf', controller.download);
 
 module.exports = router;
