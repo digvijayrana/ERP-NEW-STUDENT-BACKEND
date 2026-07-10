@@ -12,7 +12,6 @@ router.use('/classes', require('./classRoom.routes'));
 router.use('/teachers', require('./teacher.routes'));
 router.use('/students', require('./student.routes'));
 router.use('/promotions', require('./promotion.routes'));
-router.use('/ai-insights', require('./aiInsights.routes'));
 router.use('/fees', require('./fee.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/attendance', require('./attendance.routes'));
@@ -22,9 +21,6 @@ router.use('/exams', require('./exam.routes'));
 router.use('/transport', require('./transport.routes'));
 router.use('/reports', require('./report.routes'));
 router.use('/workflow', require('./workflow.routes'));
-router.use('/governance', require('./governance.routes'));
 router.use('/performance', require('./performance.routes'));
-router.use('/compliance', require('./compliance.routes'));
-router.use('/business-rules', require('./businessRules.routes'));
 
 module.exports = router;

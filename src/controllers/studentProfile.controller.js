@@ -4,7 +4,6 @@ const FeeInvoice = require('../models/FeeInvoice');
 const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
-const { analyzeStudentProfile } = require('../services/aiStudentInsight.service');
 const {
   buildTransportCard,
   buildAttendanceCard,
@@ -217,9 +216,6 @@ exports.getProfile = asyncHandler(async (req, res) => {
     const myRank = mateScores.filter((m) => m.avg > averageScore).length + 1;
     profilePayload.academic.classRank = `${myRank} / ${mateScores.length + 1}`;
   }
-
-  const aiInsights = await analyzeStudentProfile(profilePayload);
-  profilePayload.aiInsights = aiInsights;
 
   log.info('Student profile loaded', { studentId: student._id, user: req.user.email });
   res.json(profilePayload);

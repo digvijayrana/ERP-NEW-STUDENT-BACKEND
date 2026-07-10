@@ -11,10 +11,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const { ACTIONS } = require('../constants/activityActions');
 const { ROLES } = require('../constants');
-const { buildManagementInsights } = require('../services/aiInsightsEngine.service');
 const { buildDashboardTrends } = require('../services/reportAnalytics.service');
-const { buildSystemHealth } = require('../services/systemHealth.service');
-const { getPermissionsForRole } = require('../services/permission.service');
 const { getOrSet } = require('../services/cache.service');
 const { CACHE_TTL_MS } = require('../config/performance.config');
 
@@ -279,7 +276,6 @@ async function buildAdminDashboard(activeYear, user) {
     pendingDocuments,
     recentActivities,
     operationalAnalytics,
-    aiInsights,
     trends
   ] = await Promise.all([
     Student.countDocuments({}),
@@ -292,14 +288,8 @@ async function buildAdminDashboard(activeYear, user) {
     Student.countDocuments(missingMandatoryDocsFilter()),
     buildRecentActivities(),
     buildOperationalAnalytics(activeYear),
-    buildManagementInsights(activeYear, null, user || { email: 'system' }),
     buildDashboardTrends(activeYear)
   ]);
-
-  const permissions = user ? await getPermissionsForRole(user.role) : {};
-  const systemHealth = user
-    ? await buildSystemHealth(user, permissions)
-    : null;
 
   return {
     activeYear,
@@ -313,9 +303,7 @@ async function buildAdminDashboard(activeYear, user) {
     pendingDocuments,
     recentActivities,
     operational: operationalAnalytics,
-    aiInsights,
     trends,
-    systemHealth,
     students: totalStudents,
     teachers: totalTeachers
   };
@@ -344,13 +332,10 @@ async function buildScopedDashboard(req, activeYear) {
     teacherFilter = { _id: null };
   }
 
-  const [students, activeStudents, teachers, aiInsights] = await Promise.all([
+  const [students, activeStudents, teachers] = await Promise.all([
     Student.countDocuments(studentFilter),
     Student.countDocuments({ ...studentFilter, status: 'active' }),
-    Teacher.countDocuments(teacherFilter),
-    req.user.role === ROLES.TEACHER
-      ? buildManagementInsights(activeYear, req.user.teacher, req.user)
-      : Promise.resolve(null)
+    Teacher.countDocuments(teacherFilter)
   ]);
 
   return {
@@ -359,8 +344,7 @@ async function buildScopedDashboard(req, activeYear) {
     activeStudents,
     teachers,
     totalStudents: students,
-    activeTeachers: teachers,
-    aiInsights
+    activeTeachers: teachers
   };
 }
 
