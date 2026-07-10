@@ -53,11 +53,24 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.upsert = asyncHandler(async (req, res) => {
-  const { classRoom, academicYear, dayOfWeek, periods } = req.body;
+  const { classRoom, academicYear, dayOfWeek, periods = [] } = req.body;
+  const filter = { classRoom, academicYear, dayOfWeek };
+  const existing = await Timetable.findOne(filter);
+
+  let nextPeriods = periods;
+  if (existing?.periods?.length && periods.length === 1) {
+    nextPeriods = [...existing.periods, periods[0]].sort((left, right) =>
+      String(left.startTime).localeCompare(String(right.startTime))
+    );
+  }
+
   const row = await Timetable.findOneAndUpdate(
-    { classRoom, academicYear, dayOfWeek },
-    { classRoom, academicYear, dayOfWeek, periods },
+    filter,
+    { classRoom, academicYear, dayOfWeek, periods: nextPeriods },
     { new: true, upsert: true, runValidators: true }
-  );
+  )
+    .populate('classRoom', 'name section')
+    .populate('periods.teacher', 'firstName lastName employeeCode');
+
   res.status(HTTP_STATUS.CREATED).json(row);
 });

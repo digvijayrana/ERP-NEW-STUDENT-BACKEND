@@ -13,6 +13,8 @@ const attendanceRegisterSchema = new mongoose.Schema(
     lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     unlockedAt: Date,
     unlockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    autoSubmittedAt: Date,
+    autoSubmittedReason: String,
     markedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
     ...auditFieldSchema
   },

@@ -16,6 +16,35 @@ function startOfDay(date) {
   return d;
 }
 
+function calendarDateKey(date = new Date(), timeZone = 'Asia/Kolkata') {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function startOfDayFromCalendarKey(dateKey) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const result = new Date();
+  result.setFullYear(year, month - 1, day);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function startOfDayInTimezone(date = new Date(), timeZone = 'Asia/Kolkata') {
+  return startOfDayFromCalendarKey(calendarDateKey(date, timeZone));
+}
+
+function weekdayInTimezone(date = new Date(), timeZone = 'Asia/Kolkata') {
+  return new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long' }).format(date);
+}
+
+function isSundayInTimezone(date = new Date(), timeZone = 'Asia/Kolkata') {
+  return weekdayInTimezone(date, timeZone) === 'Sunday';
+}
+
 function isFutureDate(date) {
   const today = startOfDay(new Date());
   return startOfDay(date) > today;
@@ -154,7 +183,7 @@ async function loadRegisterSheet({ academicYearId, classRoomId, date, user }) {
     holiday: holiday ? { name: holiday.name, date: holiday.date } : null,
     isSunday: day.getDay() === 0,
     rows,
-    summary: computeSummary(records)
+    summary: computeSummary(rows.map((row) => ({ status: row.status })))
   };
 }
 
@@ -559,6 +588,11 @@ function studentLabel(student) {
 
 module.exports = {
   startOfDay,
+  calendarDateKey,
+  startOfDayFromCalendarKey,
+  startOfDayInTimezone,
+  weekdayInTimezone,
+  isSundayInTimezone,
   isFutureDate,
   isBlockedDate,
   teacherClassIds,

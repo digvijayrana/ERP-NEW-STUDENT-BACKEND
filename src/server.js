@@ -4,6 +4,7 @@ const { createLogger } = require('./utils/logger');
 const { checkStorageHealth, getStorageInfo } = require('./services/documentStorage.service');
 const { autoGenerateCurrentMonthDemands } = require('./services/fee.service');
 const { ensureWorker } = require('./services/jobQueue.service');
+const { startAttendanceAutoCloseScheduler } = require('./services/attendanceAutoClose.service');
 const { DEFAULTS, FALLBACK_PORT_RETRIES } = require('./constants');
 
 const log = createLogger('server');
@@ -14,6 +15,7 @@ async function startServer(portToUse) {
   try {
     await connectDb();
     ensureWorker();
+    startAttendanceAutoCloseScheduler();
 
     const storageInfo = getStorageInfo();
     const storageHealth = await checkStorageHealth();
