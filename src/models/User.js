@@ -14,6 +14,7 @@ const userSchema = new mongoose.Schema(
     teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
     parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Parent' },
+    linkedStudent: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
     linkedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Student' }],
     isActive: { type: Boolean, default: true },
     // Email verification (teachers & parents must verify before first login).
