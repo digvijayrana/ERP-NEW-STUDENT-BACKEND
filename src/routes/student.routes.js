@@ -13,6 +13,7 @@ const admissionUpload = upload.fields([
 router.post('/admissions', requirePermission('students', 'create'), admissionUpload, controller.createAdmission);
 router.post('/promotions', requirePermission('students', 'edit'), controller.promote);
 router.get('/', requirePermission('students', 'view'), controller.list);
+router.get('/parents/search', requirePermission('students', 'view'), controller.searchParents);
 router.get('/:id/profile', requirePermission('students', 'view'), require('../controllers/studentProfile.controller').getProfile);
 router.get('/:id', requirePermission('students', 'view'), controller.get);
 router.patch('/:id', requirePermission('students', 'edit'), controller.update);

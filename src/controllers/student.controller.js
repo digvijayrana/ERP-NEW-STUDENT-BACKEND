@@ -252,6 +252,61 @@ exports.list = asyncHandler(async (req, res) => {
   );
 });
 
+// Search existing guardians (by name or phone) and parent login accounts for the admission form.
+exports.searchParents = asyncHandler(async (req, res) => {
+  const term = String(req.query.q || req.query.search || '').trim();
+  if (term.length < 2) return res.json({ success: true, data: [] });
+
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(escaped, 'i');
+
+  const [students, parents] = await Promise.all([
+    Student.find({ $or: [{ 'guardians.name': regex }, { 'guardians.phone': regex }] })
+      .select('firstName lastName admissionNumber guardians')
+      .limit(25),
+    User.find({ role: ROLES.PARENT, $or: [{ name: regex }, { email: regex }] })
+      .select('name email')
+      .limit(15)
+  ]);
+
+  const seen = new Set();
+  const data = [];
+
+  for (const student of students) {
+    for (const guardian of student.guardians || []) {
+      if (!guardian?.name && !guardian?.phone) continue;
+      if (!(regex.test(guardian.name || '') || regex.test(guardian.phone || ''))) continue;
+      const key = `${(guardian.name || '').toLowerCase()}|${guardian.phone || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      data.push({
+        name: guardian.name || '',
+        relation: guardian.relation || '',
+        phone: guardian.phone || '',
+        studentName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        admissionNumber: student.admissionNumber || '',
+        source: 'guardian'
+      });
+    }
+  }
+
+  for (const parent of parents) {
+    const key = `${(parent.name || '').toLowerCase()}|`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    data.push({
+      name: parent.name || '',
+      email: parent.email || '',
+      parentUserId: parent._id,
+      relation: '',
+      phone: '',
+      source: 'account'
+    });
+  }
+
+  return res.json({ success: true, data: data.slice(0, 25) });
+});
+
 exports.get = asyncHandler(async (req, res) => {
   if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Students can only access their own profile' });
