@@ -13,7 +13,12 @@ function expandRoles(roles) {
 
 exports.authenticate = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  // Prefer the Authorization header; fall back to an access_token query param so
+  // that <img>/<a> tags can load protected files (e.g. student photos) which
+  // cannot send custom headers.
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : (req.query && req.query.access_token ? String(req.query.access_token) : null);
   if (!token) return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Authentication required' });
 
   try {

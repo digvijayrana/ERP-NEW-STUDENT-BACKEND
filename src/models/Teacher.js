@@ -16,6 +16,8 @@ const salaryHistorySchema = new mongoose.Schema(
 const teacherSchema = new mongoose.Schema(
   {
     employeeCode: { type: String, required: true, unique: true, trim: true },
+    // Central auth account auto-created for the teacher on registration.
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, trim: true },
     phone: {

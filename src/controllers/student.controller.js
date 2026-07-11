@@ -3,6 +3,7 @@ const AcademicYear = require('../models/AcademicYear');
 const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
 const User = require('../models/User');
+const Parent = require('../models/Parent');
 const asyncHandler = require('../middleware/asyncHandler');
 const { uploadDocument, extractStorageKey, readDocument } = require('../services/documentStorage.service');
 const { nextAdmissionNumber } = require('../services/sequence.service');
@@ -20,6 +21,7 @@ const { MODULES } = require('../constants/activityActions');
 const { countStudentsInClass } = require('./classRoom.controller');
 const { generateAdmissionDemand } = require('./fee.controller');
 const { createLogger } = require('../utils/logger');
+const { provisionStudentUser, provisionParentForGuardian } = require('../services/accountProvisioning.service');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
@@ -180,15 +182,47 @@ exports.createAdmission = asyncHandler(async (req, res) => {
 
   await generateAdmissionDemand(createdStudent, academicYearId, payload.classRoom, req.user);
 
-  if (payload.parentUserId) {
-    await linkStudentToParentUser(payload.parentUserId, createdStudent._id);
+  // Auto-provision the student's central login account (username + temp password).
+  let studentCredentials = null;
+  try {
+    const provisioned = await provisionStudentUser({ student: createdStudent, actor: req.user, req });
+    if (provisioned && !provisioned.existing) {
+      studentCredentials = { username: provisioned.username, temporaryPassword: provisioned.temporaryPassword };
+    }
+  } catch (error) {
+    log.warn('Failed to provision student login account', { studentId: createdStudent._id, error: error.message });
+  }
+
+  // Parent linkage: reuse an explicitly selected parent account, otherwise
+  // create/reuse a normalized Parent record + login from the primary guardian.
+  let parentCredentials = null;
+  try {
+    if (payload.parentUserId) {
+      await linkStudentToParentUser(payload.parentUserId, createdStudent._id);
+      const parentUser = await User.findById(payload.parentUserId);
+      if (parentUser?.parent && !createdStudent.parent) {
+        createdStudent.parent = parentUser.parent;
+        await createdStudent.save();
+      }
+    } else {
+      const guardians = payload.guardians || [];
+      const primaryGuardian = guardians.find((g) => g.isPrimary) || guardians[0];
+      if (primaryGuardian) {
+        const provisioned = await provisionParentForGuardian({ guardian: primaryGuardian, student: createdStudent, actor: req.user, req });
+        parentCredentials = provisioned?.credentials || null;
+      }
+    }
+  } catch (error) {
+    log.warn('Failed to link parent for student', { studentId: createdStudent._id, error: error.message });
   }
 
   res.status(HTTP_STATUS.CREATED).json({
     ...createdStudent.toObject(),
     assignedClass: { name: classRoom.name, section: classRoom.section },
     assignedAcademicYear: activeYear?.name,
-    monthlyFee: classRoom.monthlyFee
+    monthlyFee: classRoom.monthlyFee,
+    studentCredentials,
+    parentCredentials
   });
 });
 
@@ -260,29 +294,76 @@ exports.searchParents = asyncHandler(async (req, res) => {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escaped, 'i');
 
-  const [students, parents] = await Promise.all([
+  // Prefer the normalized Parent collection (single source of truth), then fall
+  // back to legacy guardians (students not yet normalized) and standalone parent
+  // User accounts. Results are merged so the same person appears only once.
+  const [parents, students, accounts] = await Promise.all([
+    Parent.find({ $or: [{ name: regex }, { phone: regex }, { email: regex }] })
+      .populate('user', '_id')
+      .limit(25),
     Student.find({ $or: [{ 'guardians.name': regex }, { 'guardians.phone': regex }] })
-      .select('firstName lastName admissionNumber guardians')
+      .select('firstName lastName admissionNumber guardians parent')
       .limit(25),
     User.find({ role: ROLES.PARENT, $or: [{ name: regex }, { email: regex }] })
-      .select('name email')
+      .select('name email parent username')
       .limit(15)
   ]);
 
-  const seen = new Set();
   const data = [];
+  const byName = new Map();
+
+  // Merge an entry into an existing same-name row when there is no conflicting
+  // phone/email (treats "same name, complementary contact info" as one person),
+  // otherwise add it as a distinct result.
+  const addEntry = (entry) => {
+    const nameKey = (entry.name || '').toLowerCase().trim();
+    const existing = nameKey ? byName.get(nameKey) : null;
+    if (existing) {
+      const phoneConflict = existing.phone && entry.phone && existing.phone !== entry.phone;
+      const emailConflict = existing.email && entry.email
+        && existing.email.toLowerCase() !== entry.email.toLowerCase();
+      if (!phoneConflict && !emailConflict) {
+        if (!existing.phone && entry.phone) existing.phone = entry.phone;
+        if (!existing.email && entry.email) existing.email = entry.email;
+        if (!existing.relation && entry.relation) existing.relation = entry.relation;
+        if (!existing.parentUserId && entry.parentUserId) existing.parentUserId = entry.parentUserId;
+        if (!existing.admissionNumber && entry.admissionNumber) {
+          existing.admissionNumber = entry.admissionNumber;
+          existing.studentName = entry.studentName;
+        }
+        return;
+      }
+    }
+    if (nameKey) byName.set(nameKey, entry);
+    data.push(entry);
+  };
+
+  const normalizedParentIds = new Set();
+  for (const parent of parents) {
+    normalizedParentIds.add(String(parent._id));
+    addEntry({
+      name: parent.name || '',
+      relation: parent.relation || '',
+      phone: parent.phone || '',
+      email: parent.email || '',
+      parentUserId: parent.user?._id,
+      parentId: parent._id,
+      childrenCount: parent.children?.length || 0,
+      source: 'parent'
+    });
+  }
 
   for (const student of students) {
+    // Skip guardians already represented by a normalized Parent record.
+    if (student.parent && normalizedParentIds.has(String(student.parent))) continue;
     for (const guardian of student.guardians || []) {
       if (!guardian?.name && !guardian?.phone) continue;
       if (!(regex.test(guardian.name || '') || regex.test(guardian.phone || ''))) continue;
-      const key = `${(guardian.name || '').toLowerCase()}|${guardian.phone || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      data.push({
+      addEntry({
         name: guardian.name || '',
         relation: guardian.relation || '',
         phone: guardian.phone || '',
+        email: guardian.email || '',
         studentName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
         admissionNumber: student.admissionNumber || '',
         source: 'guardian'
@@ -290,14 +371,12 @@ exports.searchParents = asyncHandler(async (req, res) => {
     }
   }
 
-  for (const parent of parents) {
-    const key = `${(parent.name || '').toLowerCase()}|`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    data.push({
-      name: parent.name || '',
-      email: parent.email || '',
-      parentUserId: parent._id,
+  for (const account of accounts) {
+    addEntry({
+      name: account.name || '',
+      email: account.email || '',
+      parentUserId: account._id,
+      parentId: account.parent,
       relation: '',
       phone: '',
       source: 'account'

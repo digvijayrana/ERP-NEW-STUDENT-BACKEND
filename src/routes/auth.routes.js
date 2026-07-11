@@ -4,6 +4,11 @@ const { authenticate, requirePermission, requireSuperAdmin, requireUnlock } = re
 
 router.get('/security-policy', controller.securityPolicy);
 router.post('/login', controller.login);
+router.post('/verify-email', controller.verifyEmail);
+router.post('/resend-verification', controller.resendVerification);
+router.post('/forgot-password', controller.forgotPassword);
+router.post('/verify-reset-otp', controller.verifyResetOtp);
+router.post('/reset-password', controller.resetPassword);
 router.post('/logout', authenticate, controller.logout);
 router.get('/me', authenticate, controller.me);
 router.post('/change-password', authenticate, controller.changePassword);

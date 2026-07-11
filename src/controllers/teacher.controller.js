@@ -11,6 +11,7 @@ const {
   logStatusChange
 } = require('../services/activityLog.service');
 const { validateTeacherUniques, ensureTeacherCanDeactivate } = require('../services/integrity.service');
+const { provisionTeacherUser } = require('../services/accountProvisioning.service');
 const { applySalaryRevision } = require('../services/payroll.service');
 const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
@@ -44,7 +45,27 @@ exports.create = asyncHandler(async (req, res) => {
     meta: { employeeCode: teacher.employeeCode }
   });
 
-  res.status(HTTP_STATUS.CREATED).json(teacher);
+  // Auto-provision a central login account and send an email verification link.
+  // Teachers cannot log in until they verify their email and set a password.
+  let accountStatus = null;
+  if (teacher.email) {
+    try {
+      const provisioned = await provisionTeacherUser({ teacher, actor: req.user, req });
+      if (provisioned) {
+        accountStatus = {
+          userCreated: !provisioned.existing,
+          verificationEmailSent: provisioned.verification?.delivered ?? false,
+          verificationLink: provisioned.verification && !provisioned.verification.delivered
+            ? provisioned.verification.link
+            : undefined
+        };
+      }
+    } catch (error) {
+      log.warn('Failed to provision teacher login account', { teacherId: teacher._id, error: error.message });
+    }
+  }
+
+  res.status(HTTP_STATUS.CREATED).json({ ...teacher.toObject(), accountStatus });
 });
 
 exports.list = asyncHandler(async (req, res) => {

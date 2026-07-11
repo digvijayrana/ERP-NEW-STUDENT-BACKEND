@@ -1,9 +1,12 @@
 const crypto = require('crypto');
 const User = require('../models/User');
 const Role = require('../models/Role');
+const VerificationToken = require('../models/VerificationToken');
 const asyncHandler = require('../middleware/asyncHandler');
 const { signToken } = require('../services/token.service');
 const { getPermissionsForRole, assertAssignableRole } = require('../services/permission.service');
+const { issueEmailVerification } = require('../services/accountProvisioning.service');
+const { sendPasswordResetOtp } = require('../services/email.service');
 const {
   assertValidPassword,
   isPasswordExpired,
@@ -33,6 +36,8 @@ const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
 
 const USER_SORT_FIELDS = ['name', 'email', 'role', 'createdAt'];
 const AUTH_MODULE = 'auth';
+const PASSWORD_RESET_TTL_MS = Number(process.env.PASSWORD_RESET_OTP_TTL_MS) || 10 * 60 * 1000;
+const PASSWORD_RESET_OTP_MAX_ATTEMPTS = Number(process.env.PASSWORD_RESET_OTP_MAX_ATTEMPTS) || 5;
 
 const log = createLogger('auth');
 
@@ -53,12 +58,13 @@ exports.securityPolicy = asyncHandler(async (_req, res) => {
 });
 
 exports.login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  const normalizedEmail = String(email || '').toLowerCase();
-  const user = await User.findOne({ email: normalizedEmail });
+  const { email, username, identifier, password } = req.body;
+  // Accept email OR username as the login identifier (students log in by username).
+  const loginId = String(identifier || email || username || '').toLowerCase().trim();
+  const user = await User.findOne({ $or: [{ email: loginId }, { username: loginId }] });
 
   if (!user || !user.isActive) {
-    log.warn('Login failed - invalid credentials', { email: normalizedEmail, ip: req.ip });
+    log.warn('Login failed - invalid credentials', { identifier: loginId, ip: req.ip });
     return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Invalid email or password' });
   }
 
@@ -82,8 +88,26 @@ exports.login = asyncHandler(async (req, res) => {
   const valid = await user.comparePassword(password || '');
   if (!valid) {
     await recordFailedLogin(user, req);
-    log.warn('Login failed - invalid credentials', { email: normalizedEmail, ip: req.ip });
+    log.warn('Login failed - invalid credentials', { identifier: loginId, ip: req.ip });
     return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Invalid email or password' });
+  }
+
+  // Teachers & parents must verify their email before first login. Pre-existing
+  // accounts have emailVerificationRequired=false and are unaffected.
+  if (user.emailVerificationRequired && !user.isEmailVerified) {
+    recordActivity({
+      module: AUTH_MODULE,
+      entityId: user._id,
+      entityLabel: user.email,
+      action: 'login_blocked_unverified',
+      description: `Login blocked - email not verified for ${user.email}`,
+      user: { email: user.email, role: user.role },
+      req
+    });
+    return res.status(HTTP_STATUS.FORBIDDEN).json({
+      message: 'Please verify your email address before signing in. Check your inbox for the verification link.',
+      code: 'EMAIL_NOT_VERIFIED'
+    });
   }
 
   if (isPasswordExpired(user)) {
@@ -169,6 +193,182 @@ exports.changePassword = asyncHandler(async (req, res) => {
 
   res.json({ token, user: await userWithPermissions(user) });
 });
+
+// Verify email (teachers & parents) and optionally set the initial password.
+exports.verifyEmail = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  if (!token) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Verification token is required' });
+
+  const record = await VerificationToken.consume({ rawToken: token, type: 'email_verification' });
+  if (!record) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'This verification link is invalid or has expired' });
+  }
+
+  const user = await User.findById(record.user);
+  if (!user) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Account not found' });
+
+  user.isEmailVerified = true;
+  user.emailVerifiedAt = new Date();
+
+  if (password) {
+    assertValidPassword(password);
+    await user.setPassword(password);
+    user.mustChangePassword = false;
+    user.isTemporaryPassword = false;
+    user.passwordExpiresAt = computePasswordExpiry();
+    user.securityVersion = (user.securityVersion || 0) + 1;
+  }
+  await user.save();
+
+  recordActivity({
+    module: AUTH_MODULE,
+    entityId: user._id,
+    entityLabel: user.email,
+    action: 'email_verified',
+    description: `Email verified for ${user.email}`,
+    user: { email: user.email, role: user.role },
+    req
+  });
+
+  res.json({ verified: true, passwordSet: !!password, email: user.email });
+});
+
+// Re-send a verification email (generic response to avoid account enumeration).
+exports.resendVerification = asyncHandler(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const user = email ? await User.findOne({ email }) : null;
+  if (user && user.isActive && user.emailVerificationRequired && !user.isEmailVerified) {
+    await issueEmailVerification({ user, req });
+  }
+  res.json({ message: 'If an unverified account exists for that email, a verification link has been sent.' });
+});
+
+// Forgot password (any role) - emails a one-time code (OTP) to the registered email.
+exports.forgotPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const user = email ? await User.findOne({ email }) : null;
+
+  if (!user) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Email Id is not found' });
+  }
+
+  const expiryMinutes = Math.round(PASSWORD_RESET_TTL_MS / 60000);
+  // Generic response to avoid revealing whether an email is registered.
+  const response = {
+    message: 'If an account exists for that email, a one-time code has been sent.',
+    expiresInMinutes: expiryMinutes
+  };
+
+  if (user && user.isActive) {
+    const { otp } = await VerificationToken.issueOtp({
+      userId: user._id,
+      type: 'password_reset',
+      ttlMs: PASSWORD_RESET_TTL_MS,
+      ip: req.ip
+    });
+
+    console.log('Otp',otp)
+    const result = await sendPasswordResetOtp({ to: user.email, name: user.name, otp, expiryMinutes });
+    response.emailSent = !!result.delivered;
+
+    recordActivity({
+      module: AUTH_MODULE,
+      entityId: user._id,
+      entityLabel: user.email,
+      action: 'password_reset_requested',
+      description: `Password reset code requested for ${user.email}`,
+      user: { email: user.email, role: user.role },
+      req,
+      meta: { emailDelivered: !!result.delivered }
+    });
+
+    // Fallback: if the email could not actually be delivered (SMTP not
+    // configured or send failed) surface the OTP in the response so the flow
+    // still works outside production. Never leak the code in production.
+    if (!result.delivered && process.env.NODE_ENV !== 'production') {
+      response.devOtp = otp;
+    }
+  }
+
+  res.json(response);
+});
+
+// Optional pre-check: verify the OTP without consuming it (drives the UI step).
+exports.verifyResetOtp = asyncHandler(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const otp = String(req.body.otp || '').trim();
+  const user = email ? await User.findOne({ email }) : null;
+  if (!user) return res.status(HTTP_STATUS.BAD_REQUEST).json({ valid: false, message: 'Invalid or expired code' });
+
+  const result = await VerificationToken.verifyOtp({
+    userId: user._id,
+    otp,
+    type: 'password_reset',
+    maxAttempts: PASSWORD_RESET_OTP_MAX_ATTEMPTS,
+    consume: false
+  });
+
+  if (!result.ok) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ valid: false, ...otpErrorBody(result) });
+  }
+  res.json({ valid: true });
+});
+
+// Reset password using the emailed OTP.
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const otp = String(req.body.otp || '').trim();
+  const { password } = req.body;
+  if (!email || !otp || !password) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Email, code, and new password are required' });
+  }
+
+  const user = await User.findOne({ email });
+  // Validate the password format before checking the OTP so obviously invalid
+  // requests fail early; still returns a generic error for unknown emails.
+  assertValidPassword(password);
+  if (!user) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Invalid or expired code' });
+
+  const result = await VerificationToken.verifyOtp({
+    userId: user._id,
+    otp,
+    type: 'password_reset',
+    maxAttempts: PASSWORD_RESET_OTP_MAX_ATTEMPTS,
+    consume: true
+  });
+  if (!result.ok) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json(otpErrorBody(result));
+  }
+
+  await user.setPassword(password);
+  user.mustChangePassword = false;
+  user.isTemporaryPassword = false;
+  user.passwordExpiresAt = computePasswordExpiry();
+  user.securityVersion = (user.securityVersion || 0) + 1;
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = undefined;
+  await user.save();
+  await revokeAllSessions(user._id);
+
+  recordActivity({
+    module: AUTH_MODULE,
+    entityId: user._id,
+    entityLabel: user.email,
+    action: 'password_reset_completed',
+    description: `Password reset completed for ${user.email}`,
+    user: { email: user.email, role: user.role },
+    req
+  });
+
+  res.json({ reset: true });
+});
+
+function otpErrorBody(result) {
+  if (result.reason === 'expired') return { message: 'Your code has expired. Please request a new one.', code: 'OTP_EXPIRED' };
+  if (result.reason === 'locked') return { message: 'Too many incorrect attempts. Please request a new code.', code: 'OTP_LOCKED' };
+  const suffix = typeof result.remaining === 'number' ? ` ${result.remaining} attempt(s) left.` : '';
+  return { message: `Incorrect code.${suffix}`, code: 'OTP_INVALID' };
+}
 
 exports.createUser = asyncHandler(async (req, res) => {
   const {

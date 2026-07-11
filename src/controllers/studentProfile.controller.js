@@ -160,7 +160,8 @@ exports.getProfile = asyncHandler(async (req, res) => {
       updatedBy: student.updatedBy,
       address: student.address,
       guardians: student.guardians,
-      photoUrl: photoDoc?.fileUrl || null
+      photoUrl: photoDoc?.fileUrl || null,
+      photoDocumentId: photoDoc?._id || null
     }, req.user, req.permissions),
     academic: {
       className: latestEnrollment?.classRoom

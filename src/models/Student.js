@@ -120,6 +120,10 @@ const studentSchema = new mongoose.Schema(
       tcNumber: { type: String, trim: true },
       tcDate: Date
     },
+    // Central auth account auto-created for the student at admission.
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Normalized parent reference (guardians[] retained for backward compatibility).
+    parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Parent' },
     guardians: [guardianSchema],
     documents: [documentSchema],
     enrollments: [enrollmentSchema],
