@@ -17,7 +17,8 @@ const { CACHE_TTL_MS } = require('../config/performance.config');
 
 const log = createLogger('dashboard');
 const MANDATORY_DOC_TYPES = ['photo', 'birth_certificate'];
-const RECENT_ACTIVITY_LIMIT = 20;
+const RECENT_ACTIVITY_LIMIT = 200;
+const RECENT_ACTIVITY_WINDOW_DAYS = 7;
 const PRESENT_STATUSES = new Set(['present', 'late', 'half_day']);
 
 const ACTION_TYPE_MAP = {
@@ -69,8 +70,16 @@ function mapActivityRecord(entry) {
   };
 }
 
+function startOfRecentActivityWindow() {
+  const date = new Date();
+  date.setDate(date.getDate() - RECENT_ACTIVITY_WINDOW_DAYS);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 async function buildRecentActivitiesFromStore(limit = RECENT_ACTIVITY_LIMIT) {
-  const activities = await Activity.find({})
+  const weekStart = startOfRecentActivityWindow();
+  const activities = await Activity.find({ performedAt: { $gte: weekStart } })
     .sort({ performedAt: -1 })
     .limit(limit)
     .lean();
@@ -82,6 +91,7 @@ async function buildRecentActivitiesFromStore(limit = RECENT_ACTIVITY_LIMIT) {
 }
 
 async function buildLegacyRecentActivities(limit = RECENT_ACTIVITY_LIMIT) {
+  const weekStart = startOfRecentActivityWindow();
   const [recentAdmissions, recentTeachers, recentClasses, studentsWithStatusLogs] = await Promise.all([
     Student.find({})
       .sort({ admissionDate: -1, createdAt: -1 })
@@ -154,7 +164,7 @@ async function buildLegacyRecentActivities(limit = RECENT_ACTIVITY_LIMIT) {
   });
 
   return activities
-    .filter((entry) => entry.performedAt)
+    .filter((entry) => entry.performedAt && new Date(entry.performedAt) >= weekStart)
     .sort((a, b) => new Date(b.performedAt) - new Date(a.performedAt))
     .slice(0, limit);
 }

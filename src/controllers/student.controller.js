@@ -2,6 +2,7 @@ const Admission = require('../models/Admission');
 const AcademicYear = require('../models/AcademicYear');
 const ClassRoom = require('../models/ClassRoom');
 const Student = require('../models/Student');
+const User = require('../models/User');
 const asyncHandler = require('../middleware/asyncHandler');
 const { uploadDocument, extractStorageKey, readDocument } = require('../services/documentStorage.service');
 const { nextAdmissionNumber } = require('../services/sequence.service');
@@ -31,6 +32,20 @@ const { issueAccessToken, validateAccessToken, getAccessTtlSeconds } = require('
 const STUDENT_SORT_FIELDS = ['admissionNumber', 'firstName', 'admissionDate', 'status', 'createdAt'];
 
 const log = createLogger('students');
+
+async function linkStudentToParentUser(parentUserId, studentId) {
+  if (!parentUserId) return;
+  const user = await User.findById(parentUserId);
+  if (!user || user.role !== ROLES.PARENT) {
+    throw Object.assign(new Error('Selected parent account is invalid'), { statusCode: HTTP_STATUS.BAD_REQUEST });
+  }
+  const linked = (user.linkedStudents || []).map((id) => String(id));
+  const studentKey = String(studentId);
+  if (linked.includes(studentKey)) return;
+  user.linkedStudents = [...(user.linkedStudents || []), studentId];
+  if (!user.linkedStudent) user.linkedStudent = studentId;
+  await user.save();
+}
 
 async function fileToDocument(file, type, title, folder) {
   const stored = await uploadDocument(file, folder);
@@ -164,6 +179,10 @@ exports.createAdmission = asyncHandler(async (req, res) => {
   });
 
   await generateAdmissionDemand(createdStudent, academicYearId, payload.classRoom, req.user);
+
+  if (payload.parentUserId) {
+    await linkStudentToParentUser(payload.parentUserId, createdStudent._id);
+  }
 
   res.status(HTTP_STATUS.CREATED).json({
     ...createdStudent.toObject(),
