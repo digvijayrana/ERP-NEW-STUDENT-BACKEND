@@ -5,6 +5,7 @@ const { requirePermission } = require('../middleware/auth');
 router.post('/demands/generate', requirePermission('fees', 'create'), controller.generateDemands);
 router.post('/invoices', requirePermission('fees', 'create'), controller.createInvoice);
 router.post('/invoices/bulk-monthly', requirePermission('fees', 'create'), controller.createBulkMonthlyInvoices);
+router.get('/summary', requirePermission('fees', 'view'), controller.summary);
 router.get('/invoices/preview', requirePermission('fees', 'view'), controller.previewDemand);
 router.get('/invoices', requirePermission('fees', 'view'), controller.listInvoices);
 router.get('/invoices/:id', requirePermission('fees', 'view'), controller.getInvoice);

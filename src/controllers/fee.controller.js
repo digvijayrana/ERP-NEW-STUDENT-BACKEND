@@ -332,6 +332,87 @@ exports.feeHistory = asyncHandler(async (req, res) => {
   return sendPaginated(res, slice, { page, pageSize, totalItems });
 });
 
+exports.summary = asyncHandler(async (req, res) => {
+  const baseFilter = {};
+  if (req.query.academicYear && mongoose.Types.ObjectId.isValid(req.query.academicYear)) {
+    baseFilter.academicYear = new mongoose.Types.ObjectId(req.query.academicYear);
+  }
+  if (req.query.classRoom && mongoose.Types.ObjectId.isValid(req.query.classRoom)) {
+    baseFilter.classRoom = new mongoose.Types.ObjectId(req.query.classRoom);
+  }
+
+  // Dashboard metrics are computed across all non-cancelled demands for the
+  // selected scope. Virtuals (totalAmount/paidAmount/balanceAmount) require full
+  // documents, so we select only the fields needed and reduce in JS.
+  const invoices = await FeeInvoice.find({ ...baseFilter, status: { $ne: 'cancelled' } })
+    .select('tuitionFee busFee otherCharges previousPending fine discount items payments status dueDate student');
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+  let totalCollection = 0;
+  let pendingAmount = 0;
+  let overdueAmount = 0;
+  let todayCollection = 0;
+  const defaulters = new Set();
+
+  for (const inv of invoices) {
+    totalCollection += inv.paidAmount;
+    const balance = inv.balanceAmount;
+    pendingAmount += balance;
+    const overdue = balance > 0 && inv.dueDate && new Date(inv.dueDate) < startOfToday;
+    if (overdue) {
+      overdueAmount += balance;
+      defaulters.add(String(inv.student));
+    }
+    for (const payment of inv.payments || []) {
+      if (payment.status !== 'void' && payment.paidAt) {
+        const paidAt = new Date(payment.paidAt);
+        if (paidAt >= startOfToday && paidAt <= endOfToday) todayCollection += payment.amount;
+      }
+    }
+  }
+
+  // Generation stats for the Generate Monthly Demands card (month/year scoped).
+  const feeMonth = req.query.feeMonth ? Number(req.query.feeMonth) : null;
+  const feeYear = req.query.feeYear ? Number(req.query.feeYear) : null;
+  let totalStudents = 0;
+  let demandsGenerated = 0;
+  let pendingGeneration = 0;
+  let lastGeneratedDate = null;
+
+  const studentFilter = { status: 'active' };
+  if (baseFilter.academicYear) studentFilter['enrollments.academicYear'] = baseFilter.academicYear;
+  if (baseFilter.classRoom) studentFilter['enrollments.classRoom'] = baseFilter.classRoom;
+  totalStudents = await Student.countDocuments(studentFilter);
+
+  if (feeMonth && feeYear) {
+    const monthFilter = { ...baseFilter, feeMonth, feeYear, status: { $ne: 'cancelled' } };
+    const monthInvoices = await FeeInvoice.find(monthFilter).select('student createdAt');
+    const studentsWithDemand = new Set(monthInvoices.map((inv) => String(inv.student)));
+    demandsGenerated = monthInvoices.length;
+    pendingGeneration = Math.max(totalStudents - studentsWithDemand.size, 0);
+    lastGeneratedDate = monthInvoices.reduce(
+      (latest, inv) => (!latest || inv.createdAt > latest ? inv.createdAt : latest),
+      null
+    );
+  }
+
+  res.json({
+    totalDemands: invoices.length,
+    totalCollection,
+    pendingAmount,
+    overdueAmount,
+    todayCollection,
+    defaultersCount: defaulters.size,
+    totalStudents,
+    demandsGenerated,
+    pendingGeneration,
+    lastGeneratedDate
+  });
+});
+
 exports.downloadInvoice = asyncHandler(async (req, res) => {
   const invoice = await populateInvoice(req.params.id);
   if (!invoice) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Invoice not found' });

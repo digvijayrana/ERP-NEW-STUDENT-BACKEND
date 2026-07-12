@@ -24,3 +24,9 @@ exports.nextReceiptNumber = function nextReceiptNumber() {
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   return nextSequence(`receipt-${stamp}`, `RCP-${stamp}-`, 5);
 };
+
+// Staff employee codes. Prefix depends on the role: teachers -> TE, admins -> AD.
+exports.nextEmployeeCode = function nextEmployeeCode(prefix = 'TE') {
+  const clean = String(prefix || 'TE').toUpperCase();
+  return nextSequence(`employee-${clean}`, `${clean}-`, 4);
+};

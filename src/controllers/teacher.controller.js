@@ -12,6 +12,7 @@ const {
 } = require('../services/activityLog.service');
 const { validateTeacherUniques, ensureTeacherCanDeactivate } = require('../services/integrity.service');
 const { provisionTeacherUser } = require('../services/accountProvisioning.service');
+const { nextEmployeeCode } = require('../services/sequence.service');
 const { applySalaryRevision } = require('../services/payroll.service');
 const { MODULES } = require('../constants/activityActions');
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
@@ -43,6 +44,11 @@ function validateEntryDateRanges(body) {
 }
 
 exports.create = asyncHandler(async (req, res) => {
+  // Auto-generate the employee code (TE-prefix) when the admin leaves it blank.
+  if (!req.body.employeeCode || !String(req.body.employeeCode).trim()) {
+    req.body.employeeCode = await nextEmployeeCode('TE');
+  }
+
   await validateTeacherUniques(req.body);
 
   const teacher = await Teacher.create({
@@ -236,14 +242,19 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
     rejectReason: ''
   };
 
-  if (docType === 'idProof') {
-    teacher.documents = teacher.documents || {};
+  teacher.documents = teacher.documents || {};
+  if (docType === 'photo') {
+    teacher.documents.photo = {
+      url: stored.fileUrl,
+      storageKey: stored.storageKey,
+      originalName: req.file.originalname,
+      uploadedAt: new Date()
+    };
+  } else if (docType === 'idProof') {
     teacher.documents.idProof = docEntry;
   } else if (docType === 'resume') {
-    teacher.documents = teacher.documents || {};
     teacher.documents.resume = docEntry;
   } else {
-    teacher.documents = teacher.documents || {};
     teacher.documents.certificates = teacher.documents.certificates || [];
     teacher.documents.certificates.push(docEntry);
   }
@@ -296,7 +307,14 @@ exports.selfUploadDocument = asyncHandler(async (req, res) => {
   };
 
   teacher.documents = teacher.documents || {};
-  if (docType === 'idProof') {
+  if (docType === 'photo') {
+    teacher.documents.photo = {
+      url: stored.fileUrl,
+      storageKey: stored.storageKey,
+      originalName: req.file.originalname,
+      uploadedAt: new Date()
+    };
+  } else if (docType === 'idProof') {
     teacher.documents.idProof = docEntry;
   } else if (docType === 'resume') {
     teacher.documents.resume = docEntry;
@@ -389,7 +407,8 @@ exports.streamDocument = asyncHandler(async (req, res) => {
   }
 
   try {
-    const { body, contentType } = await readDocument(key, 's3');
+    const provider = doc.url.startsWith('local://') ? 'local' : 's3';
+    const { body, contentType } = await readDocument(key, provider);
     const fileName = (doc.originalName || docType).replace(/[^\w.\-() ]/g, '_');
     const disposition = req.query.download === '1' ? 'attachment' : 'inline';
     res.setHeader('Content-Type', contentType);

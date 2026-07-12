@@ -19,6 +19,7 @@ const teacherSchema = new mongoose.Schema(
     // Central auth account auto-created for the teacher on registration.
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     firstName: { type: String, required: true, trim: true },
+    middleName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     phone: {
       type: String,
@@ -63,6 +64,7 @@ const teacherSchema = new mongoose.Schema(
       document: { url: String, originalName: String, uploadedAt: Date }
     }],
     documents: {
+      photo: { url: String, storageKey: String, originalName: String, uploadedAt: Date },
       idProof: { url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
       resume: { url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String },
       certificates: [{ url: String, storageKey: String, originalName: String, uploadedAt: Date, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }, rejectReason: String }]
@@ -80,7 +82,7 @@ teacherSchema.index({ email: 1 }, { unique: true, sparse: true });
 teacherSchema.index({ aadhaarNumber: 1 }, { unique: true, sparse: true });
 
 teacherSchema.virtual('fullName').get(function fullName() {
-  return [this.firstName, this.lastName].filter(Boolean).join(' ');
+  return [this.firstName, this.middleName, this.lastName].filter(Boolean).join(' ');
 });
 
 teacherSchema.set('toJSON', { virtuals: true });

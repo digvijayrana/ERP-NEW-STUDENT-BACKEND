@@ -77,6 +77,7 @@ const studentSchema = new mongoose.Schema(
   {
     admissionNumber: { type: String, required: true, unique: true, trim: true },
     firstName: { type: String, required: true, trim: true },
+    middleName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     gender: { type: String, enum: ['male', 'female', 'other'], required: true },
     dateOfBirth: { type: Date, required: true },
@@ -164,7 +165,7 @@ studentSchema.index({ 'enrollments.academicYear': 1, 'enrollments.classRoom': 1,
 studentSchema.index({ 'enrollments.classRoom': 1, status: 1 });
 
 studentSchema.virtual('fullName').get(function fullName() {
-  return [this.firstName, this.lastName].filter(Boolean).join(' ');
+  return [this.firstName, this.middleName, this.lastName].filter(Boolean).join(' ');
 });
 
 studentSchema.set('toJSON', { virtuals: true });
