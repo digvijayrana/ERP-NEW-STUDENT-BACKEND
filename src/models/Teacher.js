@@ -33,6 +33,7 @@ const teacherSchema = new mongoose.Schema(
       match: [/^\d{12}$/, 'Aadhaar number must be exactly 12 digits']
     },
     qualification: { type: String, trim: true },
+    subjects: [{ type: String, trim: true }],
     joiningDate: { type: Date, default: Date.now },
     baseSalary: { type: Number, required: true, min: 0 },
     salaryHistory: [salaryHistorySchema],

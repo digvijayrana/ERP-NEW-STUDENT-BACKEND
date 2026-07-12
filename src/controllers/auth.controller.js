@@ -87,9 +87,20 @@ exports.login = asyncHandler(async (req, res) => {
 
   const valid = await user.comparePassword(password || '');
   if (!valid) {
-    await recordFailedLogin(user, req);
+    const status = await recordFailedLogin(user, req);
     log.warn('Login failed - invalid credentials', { identifier: loginId, ip: req.ip });
-    return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Invalid email or password' });
+    if (status.locked) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        message: 'Account temporarily locked due to too many failed attempts. Try again later or reset your password.',
+        lockedUntil: status.lockedUntil
+      });
+    }
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+      message: status.remaining > 0
+        ? `Invalid email or password. ${status.remaining} attempt(s) remaining before your account is locked.`
+        : 'Invalid email or password.',
+      remainingAttempts: status.remaining
+    });
   }
 
   // Teachers & parents must verify their email before first login. Pre-existing

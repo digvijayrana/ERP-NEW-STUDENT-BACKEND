@@ -66,10 +66,14 @@ async function recordFailedLogin(user, req) {
   const { recordActivity } = require('./activityLog.service');
   const { MODULES, ACTIONS } = require('../constants/activityActions');
 
+  let locked = false;
+  let lockedUntil = null;
+
   if (user.failedLoginAttempts >= max) {
-    const lockedUntil = new Date();
+    lockedUntil = new Date();
     lockedUntil.setMinutes(lockedUntil.getMinutes() + securityConfig.lockout.lockDurationMinutes);
     user.lockedUntil = lockedUntil;
+    locked = true;
     log.warn('Account locked after failed attempts', { email: user.email, attempts: user.failedLoginAttempts });
     recordActivity({
       module: MODULES.USERS,
@@ -94,6 +98,14 @@ async function recordFailedLogin(user, req) {
     });
   }
   await user.save();
+
+  return {
+    attempts: user.failedLoginAttempts,
+    remaining: Math.max(0, max - user.failedLoginAttempts),
+    maxAttempts: max,
+    locked,
+    lockedUntil
+  };
 }
 
 async function clearFailedLogin(user) {
