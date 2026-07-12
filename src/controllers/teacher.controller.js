@@ -24,6 +24,24 @@ const { issueAccessToken, validateAccessToken, getAccessTtlSeconds } = require('
 const TEACHER_SORT_FIELDS = ['firstName', 'employeeCode', 'phone', 'baseSalary', 'status', 'createdAt'];
 const log = createLogger('teachers');
 
+function validateEntryDateRanges(body) {
+  for (const section of ['experience', 'education']) {
+    const list = body[section];
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (!entry || !entry.fromDate || !entry.toDate) continue;
+      const from = new Date(entry.fromDate);
+      const to = new Date(entry.toDate);
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) continue;
+      if (to < from) {
+        const err = new Error('End date cannot be earlier than the start date');
+        err.status = HTTP_STATUS.BAD_REQUEST;
+        throw err;
+      }
+    }
+  }
+}
+
 exports.create = asyncHandler(async (req, res) => {
   await validateTeacherUniques(req.body);
 
@@ -111,6 +129,8 @@ exports.get = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const existing = await Teacher.findById(req.params.id);
   if (!existing) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
+
+  validateEntryDateRanges(req.body);
 
   const uniqueFields = {};
   for (const key of ['employeeCode', 'phone', 'email', 'aadhaarNumber']) {
@@ -241,6 +261,8 @@ exports.selfUpdate = asyncHandler(async (req, res) => {
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
+
+  validateEntryDateRanges(updates);
 
   const uniqueFields = {};
   if (updates.phone !== undefined) uniqueFields.phone = updates.phone;
@@ -383,6 +405,58 @@ exports.streamDocument = asyncHandler(async (req, res) => {
     return res.send(buffer);
   } catch (error) {
     log.error('Teacher document stream failed', { teacherId: req.params.id, docType, key, error: error.message });
+    const status = error.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
+    return res.status(status).json({ message: error.message });
+  }
+});
+
+exports.streamEntryDocument = asyncHandler(async (req, res) => {
+  const teacher = await Teacher.findById(req.params.id);
+  if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
+
+  if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
+  }
+
+  const section = req.params.section;
+  const list = section === 'experience' ? teacher.experience : section === 'education' ? teacher.education : null;
+  if (!list) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Invalid document section' });
+
+  const index = Number(req.params.index);
+  const doc = list[index] && list[index].document;
+  if (!doc || !doc.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+
+  const key = extractStorageKey(doc.url, doc.storageKey);
+  if (!key) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document storage key not found' });
+
+  logDocumentAccess({
+    module: MODULES.TEACHERS,
+    entityId: teacher._id,
+    entityLabel: teacher.employeeCode,
+    documentType: `${section}[${index}]`,
+    user: req.user,
+    req
+  });
+
+  const provider = doc.url.startsWith('local://') ? 'local' : 's3';
+
+  try {
+    const { body, contentType } = await readDocument(key, provider);
+    const fileName = (doc.originalName || `${section}-document`).replace(/[^\w.\-() ]/g, '_');
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+    if (body.pipe) {
+      body.pipe(res);
+      return;
+    }
+    if (Buffer.isBuffer(body)) {
+      return res.send(body);
+    }
+    const buffer = Buffer.from(await body.transformToByteArray());
+    return res.send(buffer);
+  } catch (error) {
+    log.error('Teacher entry document stream failed', { teacherId: req.params.id, section, index, key, error: error.message });
     const status = error.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
     return res.status(status).json({ message: error.message });
   }

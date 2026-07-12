@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const FeeInvoice = require('../models/FeeInvoice');
 const Student = require('../models/Student');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -288,6 +289,9 @@ exports.feeHistory = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.student) filter.student = req.query.student;
   if (req.query.academicYear) filter.academicYear = req.query.academicYear;
+  if (req.query.classRoom && mongoose.Types.ObjectId.isValid(req.query.classRoom)) {
+    filter.classRoom = new mongoose.Types.ObjectId(req.query.classRoom);
+  }
 
   if (req.user.role === ROLES.STUDENT) filter.student = req.user.student;
   if (req.user.role === ROLES.PARENT) {
@@ -299,7 +303,7 @@ exports.feeHistory = asyncHandler(async (req, res) => {
 
   let history = await listFeeHistory(filter);
 
-  if (req.query.page || req.query.pageSize || req.query.search || req.query.paymentStatus) {
+  if (req.query.page || req.query.pageSize || req.query.search || req.query.paymentStatus || req.query.classRoom) {
     const { page, pageSize, skip } = parsePaginationQuery(req.query, PAGINATION.DEFAULT_PAGE_SIZE);
     const paginated = await listFeeHistoryPaginated({
       filter,

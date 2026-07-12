@@ -9,7 +9,10 @@ const { parsePaginationQuery } = require('../utils/pagination');
 async function readableClassFilter(req) {
   if (req.user.role === ROLES.ADMIN) return {};
   if (req.user.role === ROLES.TEACHER) {
-    return { classRoom: { $in: await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id') } };
+    const classIds = await ClassRoom.find({
+      $or: [{ classTeacher: req.user.teacher }, { 'subjects.teacher': req.user.teacher }]
+    }).distinct('_id');
+    return { classRoom: { $in: classIds } };
   }
   if (req.user.role === ROLES.PARENT) {
     const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
@@ -73,4 +76,26 @@ exports.upsert = asyncHandler(async (req, res) => {
     .populate('periods.teacher', 'firstName lastName employeeCode');
 
   res.status(HTTP_STATUS.CREATED).json(row);
+});
+
+exports.deletePeriod = asyncHandler(async (req, res) => {
+  const row = await Timetable.findById(req.params.id);
+  if (!row) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Timetable not found' });
+
+  const before = row.periods.length;
+  row.periods.pull({ _id: req.params.periodId });
+  if (row.periods.length === before) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Period not found' });
+  }
+
+  if (!row.periods.length) {
+    await row.deleteOne();
+    return res.json({ _id: row._id, classRoom: row.classRoom, dayOfWeek: row.dayOfWeek, periods: [] });
+  }
+
+  await row.save();
+  const populated = await Timetable.findById(row._id)
+    .populate('classRoom', 'name section')
+    .populate('periods.teacher', 'firstName lastName employeeCode');
+  res.json(populated);
 });
