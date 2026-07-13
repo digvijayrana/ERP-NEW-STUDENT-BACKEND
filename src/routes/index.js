@@ -19,6 +19,7 @@ router.use('/holidays', require('./holiday.routes'));
 router.use('/timetable', require('./timetable.routes'));
 router.use('/exams', require('./exam.routes'));
 router.use('/transport', require('./transport.routes'));
+router.use('/drivers', require('./drivers.routes'));
 router.use('/reports', require('./report.routes'));
 router.use('/workflow', require('./workflow.routes'));
 router.use('/performance', require('./performance.routes'));

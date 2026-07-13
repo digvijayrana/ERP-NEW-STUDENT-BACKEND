@@ -5,7 +5,7 @@ const { auditOnCreate } = require('../utils/auditFields');
 const { logEntityCreate, logEntityUpdate } = require('../services/activityLog.service');
 const { HTTP_STATUS } = require('../constants');
 
-const MODULE = 'transport';
+const MODULE = 'drivers';
 
 function currentPeriod() {
   const now = new Date();

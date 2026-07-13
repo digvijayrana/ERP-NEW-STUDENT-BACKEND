@@ -7,7 +7,7 @@ const { HTTP_STATUS, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
 
-const MODULE = 'transport';
+const MODULE = 'drivers';
 const SORT_FIELDS = ['vehicleNumber', 'model', 'driverName', 'status', 'createdAt'];
 const DOC_TYPES = ['driverPhoto', 'driverAadhaar', 'driverLicensePhoto'];
 const DOC_LABELS = {

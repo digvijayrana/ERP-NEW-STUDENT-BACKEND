@@ -1,14 +1,15 @@
 const PDFDocument = require('pdfkit');
 
+// Teal palette matching the app theme (primary #0d9488 / bright #14b8a6 / deep #05191d).
 const C = {
-  NAVY: '#0d1b4a',
-  ROYAL: '#1b3a8c',
-  BLUE: '#2563eb',
-  SKY: '#3b82f6',
-  LIGHT_BLUE: '#dbeafe',
-  ICE: '#eff6ff',
-  GOLD: '#d4a017',
-  GOLD_LIGHT: '#fef9c3',
+  NAVY: '#0f2e2b',
+  ROYAL: '#0f766e',
+  BLUE: '#0d9488',
+  SKY: '#14b8a6',
+  LIGHT_BLUE: '#99f6e4',
+  ICE: '#f0fdfa',
+  GOLD: '#5eead4',
+  GOLD_LIGHT: '#ccfbf1',
   TEXT: '#1e293b',
   MUTED: '#64748b',
   LIGHT_GRAY: '#f1f5f9',
@@ -77,13 +78,14 @@ function toHex(n) {
 }
 
 function gradientBand(doc, y, h) {
+  // Deep teal (#0a2a33) -> bright teal (#14b8a6), matching the app shell/sidebar.
   const steps = 20;
   const stepW = W / steps;
   for (let i = 0; i < steps; i++) {
     const ratio = i / steps;
-    const r = Math.round(13 + ratio * (27 - 13));
-    const g = Math.round(27 + ratio * (58 - 27));
-    const b = Math.round(74 + ratio * (140 - 74));
+    const r = Math.round(10 + ratio * (20 - 10));
+    const g = Math.round(42 + ratio * (184 - 42));
+    const b = Math.round(51 + ratio * (166 - 51));
     doc.rect(LEFT + i * stepW, y, stepW + 1, h).fill(`#${toHex(r)}${toHex(g)}${toHex(b)}`);
   }
 }
@@ -106,12 +108,12 @@ function headerBlock(doc) {
   doc.fontSize(24).fillColor(C.WHITE).font('Helvetica-Bold')
     .text(s.name.toUpperCase(), LEFT + 20, topY + 14, { width: W - 100 });
 
-  doc.fontSize(9).fillColor('#93c5fd').font('Helvetica')
+  doc.fontSize(9).fillColor('#99f6e4').font('Helvetica')
     .text(s.address, LEFT + 20, topY + 46, { width: W - 100 });
 
   const contact = [s.phone, s.email, s.website].filter(Boolean);
   if (contact.length) {
-    doc.fontSize(8).fillColor('#93c5fd')
+    doc.fontSize(8).fillColor('#99f6e4')
       .text(contact.join('   ·   '), LEFT + 20, topY + 60, { width: W - 100 });
   }
 

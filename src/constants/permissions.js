@@ -15,6 +15,7 @@ const MODULES = [
   'exams',
   'reports',
   'transport',
+  'drivers',
   'governance'
 ];
 
@@ -59,6 +60,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       exams: { view: true, create: true, edit: true, delete: true, approve: true, print: true },
       reports: { view: true, export: true, print: true },
       transport: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      drivers: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
       governance: { view: true, edit: true, export: true, print: true }
     })
   },
@@ -80,6 +82,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       exams: { view: true, approve: true, print: true },
       reports: { view: true, export: true, print: true },
       transport: { view: true, export: true, print: true },
+      drivers: { view: true, export: true, print: true },
       governance: { view: true, print: true }
     })
   },
@@ -105,7 +108,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       fees: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
       payroll: { view: true, export: true, print: true, approve: true, unlock: true },
       reports: { view: true, export: true, print: true },
-      transport: { view: true, export: true, print: true }
+      transport: { view: true, export: true, print: true },
+      drivers: { view: true, export: true, print: true }
     })
   },
   transport_manager: {
@@ -115,6 +119,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       dashboard: { view: true },
       students: { view: true, export: true },
       transport: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
+      drivers: { view: true, create: true, edit: true, deactivate: true, export: true, print: true },
       reports: { view: true, export: true, print: true }
     })
   },
@@ -127,7 +132,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       classes: { view: true },
       students: { view: true, create: true, edit: true, export: true, print: true },
       teachers: { view: true },
-      transport: { view: true, create: true, edit: true }
+      transport: { view: true, create: true, edit: true },
+      drivers: { view: true }
     })
   },
   receptionist: {
@@ -139,7 +145,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       classes: { view: true },
       students: { view: true, create: true, edit: true, export: true, print: true },
       teachers: { view: true },
-      transport: { view: true, create: true, edit: true }
+      transport: { view: true, create: true, edit: true },
+      drivers: { view: true }
     })
   },
   parent: {

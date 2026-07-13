@@ -62,13 +62,33 @@ async function loadRoleCache() {
   cacheExpiresAt = Date.now() + CACHE_TTL_MS;
 }
 
+function mergePermissions(base = {}, override = {}) {
+  // Union of the code defaults and the stored (DB) permissions. Because built-in
+  // system roles are re-seeded to their code defaults on boot / cache refresh,
+  // this guarantees a newly added module is granted immediately for those roles
+  // without waiting for the reseed, while still honouring any extra DB grants.
+  const merged = {};
+  for (const module of MODULES) {
+    merged[module] = {};
+    for (const action of ACTIONS) {
+      merged[module][action] = !!base?.[module]?.[action] || !!override?.[module]?.[action];
+    }
+  }
+  return merged;
+}
+
 async function getPermissionsForRole(roleSlug) {
   await loadRoleCache();
   if (roleSlug === 'super_admin') {
     return normalizePermissions(DEFAULT_ROLE_PERMISSIONS.super_admin.permissions);
   }
   const resolved = resolveRoleSlug(roleSlug);
-  return roleCache.get(resolved) || roleCache.get(roleSlug) || normalizePermissions({});
+  const stored = roleCache.get(resolved) || roleCache.get(roleSlug);
+  const defaults = DEFAULT_ROLE_PERMISSIONS[resolved] || DEFAULT_ROLE_PERMISSIONS[roleSlug];
+  // For built-in roles, layer stored (DB) permissions over the code defaults so a
+  // freshly added module is visible even before the role document is re-seeded.
+  if (defaults) return mergePermissions(defaults.permissions, stored || {});
+  return stored || normalizePermissions({});
 }
 
 async function assertAssignableRole(roleSlug) {
