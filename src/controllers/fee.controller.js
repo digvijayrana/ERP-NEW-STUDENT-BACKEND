@@ -61,15 +61,15 @@ function assertInvoiceAccess(req, invoice) {
 }
 
 exports.generateDemands = asyncHandler(async (req, res) => {
-  const { academicYear, classRoom, year, month } = req.body;
-  const result = await generateMonthlyDemands({ academicYearId: academicYear, classRoomId: classRoom, year, month });
+  const { academicYear, classRoom, student, year, month, cycle } = req.body;
+  const result = await generateMonthlyDemands({ academicYearId: academicYear, classRoomId: classRoom, studentId: student, year, month, cycle });
 
   logFeeActivity({
     action: 'fee_demand_generation',
-    description: `Generated ${result.created} fee demands for ${result.feeMonth}/${result.feeYear}`,
+    description: `Generated ${result.created} ${result.cycle} fee demands for ${result.feeMonth}/${result.feeYear}`,
     user: req.user,
     entityLabel: `demands-${result.feeYear}-${result.feeMonth}`,
-    meta: { created: result.created, skipped: result.skipped }
+    meta: { created: result.created, skipped: result.skipped, cycle: result.cycle }
   });
 
   res.status(HTTP_STATUS.CREATED).json(result);
@@ -159,13 +159,13 @@ exports.getInvoice = asyncHandler(async (req, res) => {
 });
 
 exports.previewDemand = asyncHandler(async (req, res) => {
-  const { student, academicYear, classRoom, year, month } = req.query;
+  const { student, academicYear, classRoom, year, month, cycle } = req.query;
   const studentDoc = await Student.findById(student);
   if (!studentDoc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
   const targetYear = Number(year) || new Date().getFullYear();
   const targetMonth = Number(month) || new Date().getMonth() + 1;
-  const demand = await buildDemandData(studentDoc, academicYear, classRoom, targetYear, targetMonth);
+  const demand = await buildDemandData(studentDoc, academicYear, classRoom, targetYear, targetMonth, cycle);
   const totalPayable = demand.tuitionFee + demand.busFee + demand.otherCharges + demand.previousPending;
 
   res.json({

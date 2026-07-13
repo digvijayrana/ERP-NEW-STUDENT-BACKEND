@@ -1,6 +1,13 @@
 const router = require('express').Router();
 const controller = require('../controllers/fee.controller');
+const structureController = require('../controllers/feeStructure.controller');
 const { requirePermission } = require('../middleware/auth');
+
+// Fee structure definition (admission / registration / tuition / bus / lab / custom components)
+router.get('/structures', requirePermission('fees', 'view'), structureController.list);
+router.get('/structures/for-class', requirePermission('fees', 'view'), structureController.getForClass);
+router.put('/structures', requirePermission('fees', 'create'), structureController.upsert);
+router.delete('/structures/:id', requirePermission('fees', 'create'), structureController.remove);
 
 router.post('/demands/generate', requirePermission('fees', 'create'), controller.generateDemands);
 router.post('/invoices', requirePermission('fees', 'create'), controller.createInvoice);

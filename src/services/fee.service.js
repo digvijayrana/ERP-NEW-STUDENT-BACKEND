@@ -1,6 +1,7 @@
 const AcademicYear = require('../models/AcademicYear');
 const ClassRoom = require('../models/ClassRoom');
 const FeeInvoice = require('../models/FeeInvoice');
+const FeeStructure = require('../models/FeeStructure');
 const Student = require('../models/Student');
 const { nextInvoiceNumber, nextReceiptNumber } = require('./sequence.service');
 const { resolveBusFee } = require('./bus.service');
@@ -44,23 +45,111 @@ async function calculatePreviousPending(studentId, academicYearId, year, month) 
   return priorInvoices.reduce((sum, invoice) => sum + Math.max(invoice.balanceAmount || 0, 0), 0);
 }
 
-async function buildDemandData(student, academicYearId, classRoomId, year, month) {
-  const tuitionFee = await resolveTuitionFee(student, academicYearId, classRoomId);
-  const busFee = resolveBusFee(student, year, month);
+// Number of months covered by a billing cycle / a component frequency.
+const CYCLE_MONTHS = { monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12 };
+
+function cycleMonths(cycle) {
+  return CYCLE_MONTHS[cycle] || 1;
+}
+
+// Amount a recurring component contributes when a demand is generated for `monthsInCycle`
+// months. A component's amount is expressed per its own frequency, so we normalise to a
+// monthly rate and multiply by the requested cycle length.
+// e.g. a quarterly ₹3000 component == ₹1000/month -> a quarterly demand bills ₹3000,
+// a monthly demand bills ₹1000, a yearly demand bills ₹12000.
+function proratedAmount(amount, frequency, monthsInCycle) {
+  const perMonth = amount / cycleMonths(frequency);
+  return Math.round(perMonth * monthsInCycle);
+}
+
+// Due date = last day of the final month covered by the cycle.
+function cycleEndDueDate(year, month, monthsInCycle) {
+  return new Date(year, month - 1 + monthsInCycle, 0);
+}
+
+async function buildDemandData(student, academicYearId, classRoomId, year, month, cycle = 'monthly') {
+  const monthsInCycle = cycleMonths(cycle);
   const previousPending = await calculatePreviousPending(student._id, academicYearId, year, month);
+
+  const [hasYearInvoice, hasAnyInvoice, structure] = await Promise.all([
+    FeeInvoice.exists({ student: student._id, academicYear: academicYearId, status: { $ne: 'cancelled' } }),
+    FeeInvoice.exists({ student: student._id, status: { $ne: 'cancelled' } }),
+    FeeStructure.findOne({ academicYear: academicYearId, classRoom: classRoomId, status: 'active' }).lean()
+  ]);
+  const isFirstDemandOfYear = !hasYearInvoice;
+  const isNewStudent = !hasAnyInvoice;
+
+  let structureTuition = 0;
+  let structureHasTuition = false;
+  let structureBusFee = 0;
+  let otherCharges = 0;
+  const feeComponents = [];
+
+  if (structure && Array.isArray(structure.components)) {
+    for (const component of structure.components) {
+      const amount = Math.max(Number(component.amount) || 0, 0);
+      if (amount <= 0) continue;
+
+      let billed;
+      if (component.frequency === 'one_time') {
+        // One-time items bill once: admission for brand-new students, others on the year's first demand.
+        const due = component.newAdmissionOnly ? isNewStudent : isFirstDemandOfYear;
+        if (!due) continue;
+        billed = amount;
+      } else {
+        billed = proratedAmount(amount, component.frequency, monthsInCycle);
+        if (billed <= 0) continue;
+      }
+
+      if (component.key === 'tuition') {
+        structureHasTuition = true;
+        structureTuition += billed;
+        continue;
+      }
+      if (component.key === 'bus') {
+        structureBusFee += billed;
+        continue;
+      }
+      otherCharges += billed;
+      feeComponents.push({ key: component.key, label: component.label, amount: billed });
+    }
+  }
+
+  // Tuition precedence: structure (when it defines tuition) > per-student enrollment override > class default.
+  let tuitionFee = 0;
+  if (structureHasTuition) {
+    tuitionFee = structureTuition;
+  } else {
+    const enrollment = getActiveEnrollment(student, academicYearId);
+    let baseMonthly;
+    if (enrollment?.monthlyFee != null) {
+      baseMonthly = enrollment.monthlyFee;
+    } else {
+      const classRoom = await ClassRoom.findById(classRoomId).select('monthlyFee');
+      baseMonthly = classRoom?.monthlyFee || 0;
+    }
+    tuitionFee = baseMonthly * monthsInCycle;
+  }
+  if (tuitionFee > 0) feeComponents.unshift({ key: 'tuition', label: 'Tuition Fee', amount: tuitionFee });
+
+  // Bus fee: an actual bus registration always wins over a structure default (avoids double billing).
+  const registrationBus = resolveBusFee(student, year, month);
+  const busFee = registrationBus > 0 ? registrationBus * monthsInCycle : structureBusFee;
+  if (busFee > 0) feeComponents.push({ key: 'bus', label: 'Bus Fee', amount: busFee });
 
   return {
     tuitionFee,
     busFee,
-    otherCharges: 0,
+    otherCharges,
     previousPending,
     discount: 0,
     fine: 0,
+    feeComponents,
     ...demandPeriod(year, month),
-    dueDate: monthEndDueDate(year, month),
+    billingCycle: cycle,
+    dueDate: cycleEndDueDate(year, month, monthsInCycle),
     items: [
-      { label: 'Tuition Fee', amount: tuitionFee },
-      ...(busFee > 0 ? [{ label: 'Bus Fee', amount: busFee }] : []),
+      ...feeComponents.map((component) => ({ label: component.label, amount: component.amount })),
       ...(previousPending > 0 ? [{ label: 'Previous Pending', amount: previousPending }] : [])
     ].filter((item) => item.amount > 0)
   };
@@ -82,10 +171,10 @@ async function ensureNoDuplicateDemand(studentId, academicYearId, year, month) {
   }
 }
 
-async function createDemandForStudent(student, academicYearId, classRoomId, year, month) {
+async function createDemandForStudent(student, academicYearId, classRoomId, year, month, cycle = 'monthly') {
   await ensureAcademicYearEditable(academicYearId);
   await ensureNoDuplicateDemand(student._id, academicYearId, year, month);
-  const demand = await buildDemandData(student, academicYearId, classRoomId, year, month);
+  const demand = await buildDemandData(student, academicYearId, classRoomId, year, month, cycle);
 
   return FeeInvoice.create({
     student: student._id,
@@ -96,7 +185,7 @@ async function createDemandForStudent(student, academicYearId, classRoomId, year
   });
 }
 
-async function generateMonthlyDemands({ academicYearId, year, month, classRoomId }) {
+async function generateMonthlyDemands({ academicYearId, year, month, classRoomId, studentId, cycle = 'monthly' }) {
   const yearDoc = academicYearId
     ? await AcademicYear.findById(academicYearId)
     : await AcademicYear.findOne({ status: 'active' });
@@ -122,6 +211,7 @@ async function generateMonthlyDemands({ academicYearId, year, month, classRoomId
       }
     }
   };
+  if (studentId) studentFilter._id = studentId;
 
   const students = await Student.find(studentFilter);
   const created = [];
@@ -137,7 +227,8 @@ async function generateMonthlyDemands({ academicYearId, year, month, classRoomId
         yearDoc._id,
         enrollment.classRoom,
         targetYear,
-        targetMonth
+        targetMonth,
+        cycle
       );
       created.push(invoice);
     } catch (error) {
@@ -153,6 +244,7 @@ async function generateMonthlyDemands({ academicYearId, year, month, classRoomId
     academicYear: yearDoc._id,
     feeMonth: targetMonth,
     feeYear: targetYear,
+    cycle,
     created: created.length,
     skipped: skipped.length,
     invoices: created

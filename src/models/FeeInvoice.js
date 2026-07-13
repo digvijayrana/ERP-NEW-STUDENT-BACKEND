@@ -36,12 +36,20 @@ const feeInvoiceSchema = new mongoose.Schema(
     invoiceNumber: { type: String, required: true, unique: true },
     feeMonth: { type: Number, min: 1, max: 12, required: true },
     feeYear: { type: Number, required: true },
+    billingCycle: { type: String, enum: ['monthly', 'quarterly', 'half_yearly', 'yearly'], default: 'monthly' },
     dueDate: { type: Date, required: true },
     tuitionFee: { type: Number, default: 0, min: 0 },
     busFee: { type: Number, default: 0, min: 0 },
     otherCharges: { type: Number, default: 0, min: 0 },
     previousPending: { type: Number, default: 0, min: 0 },
     items: [feeItemSchema],
+    // Detailed fee-structure breakdown (admission, registration, tuition, bus, lab, custom).
+    feeComponents: [
+      new mongoose.Schema(
+        { key: String, label: String, amount: { type: Number, default: 0, min: 0 } },
+        { _id: false }
+      )
+    ],
     discount: { type: Number, default: 0, min: 0 },
     fine: { type: Number, default: 0, min: 0 },
     payments: [paymentSchema],
@@ -86,6 +94,17 @@ feeInvoiceSchema.virtual('balanceAmount').get(function balanceAmount() {
 });
 
 function syncItemsFromComponents(doc) {
+  // Prefer the detailed fee-structure breakdown when present so line items
+  // (Admission Fee, Lab Fee, etc.) survive on the invoice, PDF and detail view.
+  if (Array.isArray(doc.feeComponents) && doc.feeComponents.length) {
+    const detailed = doc.feeComponents
+      .filter((component) => component.amount > 0)
+      .map((component) => ({ label: component.label, amount: component.amount }));
+    if (doc.previousPending > 0) detailed.push({ label: 'Previous Pending', amount: doc.previousPending });
+    if (detailed.length) doc.items = detailed;
+    return;
+  }
+
   const items = [];
   if (doc.tuitionFee > 0) items.push({ label: 'Tuition Fee', amount: doc.tuitionFee });
   if (doc.busFee > 0) items.push({ label: 'Bus Fee', amount: doc.busFee });
