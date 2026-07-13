@@ -175,6 +175,14 @@ async function listRoutes(filter = {}) {
   return Promise.all(routes.map((route) => enrichRoute(route)));
 }
 
+function assertValidDriverMobile(mobile) {
+  if (mobile && !/^\d{10}$/.test(String(mobile).trim())) {
+    const error = new Error('Driver mobile must be exactly 10 digits');
+    error.status = HTTP_STATUS.BAD_REQUEST;
+    throw error;
+  }
+}
+
 async function createRoute(payload, user) {
   const stops = normalizeStops(payload.stops);
   if (!stops.length) {
@@ -182,10 +190,12 @@ async function createRoute(payload, user) {
     error.status = HTTP_STATUS.BAD_REQUEST;
     throw error;
   }
+  assertValidDriverMobile(payload.driverMobile);
 
   const route = await BusRoute.create({
     routeName: payload.routeName,
     routeCode: String(payload.routeCode || '').trim().toUpperCase(),
+    vehicle: payload.vehicle || undefined,
     vehicleNumber: payload.vehicleNumber,
     driverName: payload.driverName,
     driverMobile: payload.driverMobile,
@@ -211,9 +221,13 @@ async function updateRoute(routeId, payload, user) {
 
   if (payload.routeName !== undefined) route.routeName = payload.routeName;
   if (payload.routeCode !== undefined) route.routeCode = String(payload.routeCode).trim().toUpperCase();
+  if (payload.vehicle !== undefined) route.vehicle = payload.vehicle || undefined;
   if (payload.vehicleNumber !== undefined) route.vehicleNumber = payload.vehicleNumber;
   if (payload.driverName !== undefined) route.driverName = payload.driverName;
-  if (payload.driverMobile !== undefined) route.driverMobile = payload.driverMobile;
+  if (payload.driverMobile !== undefined) {
+    assertValidDriverMobile(payload.driverMobile);
+    route.driverMobile = payload.driverMobile;
+  }
   if (payload.capacity !== undefined) route.capacity = payload.capacity;
   if (payload.feeType !== undefined) route.feeType = payload.feeType;
   if (payload.fixedMonthlyFee !== undefined) route.fixedMonthlyFee = payload.fixedMonthlyFee;

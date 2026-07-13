@@ -15,6 +15,7 @@ const busRouteSchema = new mongoose.Schema(
   {
     routeName: { type: String, required: true, trim: true },
     routeCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    vehicle: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle' },
     vehicleNumber: { type: String, required: true, trim: true },
     driverName: { type: String, required: true, trim: true },
     driverMobile: { type: String, required: true, trim: true },

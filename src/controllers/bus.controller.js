@@ -124,6 +124,14 @@ exports.listRegistrations = asyncHandler(async (req, res) => {
   if (req.query.busService === 'true') filter.busService = true;
   if (req.query.busService === 'false') filter.busService = false;
 
+  // Class/section filter — registrations don't store class, so resolve via student enrollments.
+  if (req.query.classRoom) {
+    const enrollmentMatch = { classRoom: req.query.classRoom };
+    if (req.query.academicYear) enrollmentMatch.academicYear = req.query.academicYear;
+    const classStudentIds = await Student.find({ enrollments: { $elemMatch: enrollmentMatch } }).distinct('_id');
+    filter.student = { $in: classStudentIds };
+  }
+
   if (req.query.search) {
     const term = req.query.search.trim();
     const regex = new RegExp(term, 'i');
