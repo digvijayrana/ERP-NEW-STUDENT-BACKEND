@@ -34,6 +34,33 @@ async function resolveTuitionFee(student, academicYearId, classRoomId) {
   return classRoom?.monthlyFee || 0;
 }
 
+/**
+ * Resolve the active fee structure that applies to a section. Fee structures are
+ * defined per class NAME (shared across sections). Resolution order:
+ *   1. the structure explicitly linked on the classroom,
+ *   2. the class-level structure matched by (academicYear, className),
+ *   3. a legacy per-section structure matched by (academicYear, classRoom).
+ */
+async function resolveActiveFeeStructure(academicYearId, classRoomId) {
+  const classRoom = await ClassRoom.findById(classRoomId).select('name feeStructure').lean();
+
+  if (classRoom?.feeStructure) {
+    const linked = await FeeStructure.findOne({ _id: classRoom.feeStructure, status: 'active' }).lean();
+    if (linked) return linked;
+  }
+
+  if (classRoom?.name) {
+    const byName = await FeeStructure.findOne({
+      academicYear: academicYearId,
+      className: String(classRoom.name).trim(),
+      status: 'active'
+    }).lean();
+    if (byName) return byName;
+  }
+
+  return FeeStructure.findOne({ academicYear: academicYearId, classRoom: classRoomId, status: 'active' }).lean();
+}
+
 async function calculatePreviousPending(studentId, academicYearId, year, month) {
   const priorInvoices = await FeeInvoice.find({
     student: studentId,
@@ -74,7 +101,7 @@ async function buildDemandData(student, academicYearId, classRoomId, year, month
   const [hasYearInvoice, hasAnyInvoice, structure] = await Promise.all([
     FeeInvoice.exists({ student: student._id, academicYear: academicYearId, status: { $ne: 'cancelled' } }),
     FeeInvoice.exists({ student: student._id, status: { $ne: 'cancelled' } }),
-    FeeStructure.findOne({ academicYear: academicYearId, classRoom: classRoomId, status: 'active' }).lean()
+    resolveActiveFeeStructure(academicYearId, classRoomId)
   ]);
   const isFirstDemandOfYear = !hasYearInvoice;
   const isNewStudent = !hasAnyInvoice;

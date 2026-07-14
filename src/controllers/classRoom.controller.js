@@ -1,5 +1,6 @@
 const ClassRoom = require('../models/ClassRoom');
 const Teacher = require('../models/Teacher');
+const FeeStructure = require('../models/FeeStructure');
 const asyncHandler = require('../middleware/asyncHandler');
 const { createLogger } = require('../utils/logger');
 const {
@@ -28,6 +29,42 @@ const { invalidateNamespace } = require('../services/cache.service');
 const CLASS_SORT_FIELDS = ['name', 'monthlyFee', 'status', 'createdAt'];
 
 const log = createLogger('class-room');
+
+const MONTHLY_EQUIVALENT = {
+  monthly: 1,
+  quarterly: 1 / 3,
+  half_yearly: 1 / 6,
+  yearly: 1 / 12,
+  one_time: 0
+};
+
+/** Monthly-equivalent tuition implied by a fee structure's tuition component(s). */
+function monthlyTuitionFromStructure(structure) {
+  if (!structure || !Array.isArray(structure.components)) return 0;
+  const monthly = structure.components
+    .filter((component) => component.key === 'tuition')
+    .reduce((sum, component) => {
+      const factor = MONTHLY_EQUIVALENT[component.frequency] ?? 1;
+      return sum + Math.max(Number(component.amount) || 0, 0) * factor;
+    }, 0);
+  return Math.round(monthly);
+}
+
+/**
+ * Resolve the class-level fee structure for a class name + year and derive the
+ * fields that should be stamped onto the section (classroom): the structure id
+ * and the monthly tuition amount. Returns null when no structure exists.
+ */
+async function resolveClassFeeLink(academicYear, className) {
+  if (!academicYear || !className) return null;
+  const structure = await FeeStructure.findOne({
+    academicYear,
+    className: String(className).trim(),
+    status: 'active'
+  }).lean();
+  if (!structure) return null;
+  return { feeStructure: structure._id, monthlyFee: monthlyTuitionFromStructure(structure) };
+}
 
 function normalizeClassPayload(payload) {
   const next = { ...payload };
@@ -74,6 +111,13 @@ exports.create = asyncHandler(async (req, res) => {
   await ensureAcademicYearEditable(payload.academicYear);
   await ensureUniqueClassCombination(payload.name, payload.section, payload.academicYear);
   await ensureClassTeacherIsAvailable(payload.classTeacher);
+
+  // Auto-attach the class-level fee structure (applies to all sections of the class).
+  const feeLink = await resolveClassFeeLink(payload.academicYear, payload.name);
+  if (feeLink) {
+    payload.feeStructure = feeLink.feeStructure;
+    payload.monthlyFee = feeLink.monthlyFee;
+  }
 
   const classRoom = await ClassRoom.create({ ...payload, ...auditOnCreate(req.user) });
   log.info('Class created', { id: classRoom._id, name: classRoom.name, section: classRoom.section, userId: req.user?.id });
@@ -152,6 +196,13 @@ exports.update = asyncHandler(async (req, res) => {
 
   await ensureUniqueClassCombination(nextName, nextSection, nextYear, existing._id);
   await ensureClassTeacherIsAvailable(payload.classTeacher, existing._id);
+
+  // Keep the class-level fee structure link in sync with the class name + year.
+  const feeLink = await resolveClassFeeLink(nextYear, nextName);
+  if (feeLink) {
+    payload.feeStructure = feeLink.feeStructure;
+    payload.monthlyFee = feeLink.monthlyFee;
+  }
 
   if (payload.capacity !== undefined) {
     const yearId = payload.academicYear ?? existing.academicYear;

@@ -16,6 +16,8 @@ const classRoomSchema = new mongoose.Schema(
       }
     ],
     monthlyFee: { type: Number, default: 0, min: 0 },
+    // Auto-linked class-level fee structure (same for every section of the class).
+    feeStructure: { type: mongoose.Schema.Types.ObjectId, ref: 'FeeStructure' },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     ...softDeleteFieldSchema,
     ...auditFieldSchema
