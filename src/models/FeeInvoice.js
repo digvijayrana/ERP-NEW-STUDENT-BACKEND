@@ -101,6 +101,17 @@ function syncItemsFromComponents(doc) {
       .filter((component) => component.amount > 0)
       .map((component) => ({ label: component.label, amount: component.amount }));
     if (doc.previousPending > 0) detailed.push({ label: 'Previous Pending', amount: doc.previousPending });
+
+    // Guarantee Bus Fee appears whenever the invoice carries busFee, even if it
+    // was omitted from feeComponents (legacy invoices / older demand logic).
+    const hasBus = detailed.some((item) => /bus\s*fee/i.test(String(item.label || '')));
+    if (!hasBus && Number(doc.busFee) > 0) {
+      const tuitionIdx = detailed.findIndex((item) => /tuition/i.test(String(item.label || '')));
+      const busLine = { label: 'Bus Fee', amount: doc.busFee };
+      if (tuitionIdx >= 0) detailed.splice(tuitionIdx + 1, 0, busLine);
+      else detailed.push(busLine);
+    }
+
     if (detailed.length) doc.items = detailed;
     return;
   }

@@ -1,4 +1,5 @@
 const Vehicle = require('../models/Vehicle');
+const BusRoute = require('../models/BusRoute');
 const asyncHandler = require('../middleware/asyncHandler');
 const { auditOnCreate, auditOnUpdate } = require('../utils/auditFields');
 const { logEntityCreate, logEntityUpdate } = require('../services/activityLog.service');
@@ -63,6 +64,56 @@ function invalidMobile(payload) {
   return null;
 }
 
+const EXPIRY_FIELDS = [
+  'registrationExpiry',
+  'insuranceExpiry',
+  'pollutionExpiry',
+  'fitnessExpiry',
+  'licenseExpiry'
+];
+
+/** Expiry dates must be strictly in the future (not today or past). */
+function invalidExpiryDates(payload) {
+  const startOfTomorrow = new Date();
+  startOfTomorrow.setHours(0, 0, 0, 0);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  for (const field of EXPIRY_FIELDS) {
+    if (payload[field] === undefined || payload[field] === null || payload[field] === '') continue;
+    const value = new Date(payload[field]);
+    if (Number.isNaN(value.getTime())) {
+      return `${field} is not a valid date`;
+    }
+    if (value < startOfTomorrow) {
+      return 'Expiry dates must be a future date (today or past dates are not allowed)';
+    }
+  }
+  return null;
+}
+
+/**
+ * Keep Bus Routes in sync when vehicle/driver details change so the Transport
+ * "Bus routes" list reflects the latest driver name, mobile, and vehicle number.
+ */
+async function syncLinkedBusRoutes(vehicle) {
+  if (!vehicle?._id) return;
+  const updates = {
+    driverName: vehicle.driverName || '',
+    driverMobile: vehicle.driverMobile || '',
+    vehicleNumber: vehicle.vehicleNumber || '',
+    capacity: vehicle.capacity || 40
+  };
+  await BusRoute.updateMany(
+    {
+      $or: [
+        { vehicle: vehicle._id },
+        { vehicleNumber: vehicle.vehicleNumber }
+      ]
+    },
+    { $set: updates }
+  );
+}
+
 exports.list = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
@@ -100,6 +151,8 @@ exports.create = asyncHandler(async (req, res) => {
   }
   const mobileError = invalidMobile(payload);
   if (mobileError) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: mobileError });
+  const expiryError = invalidExpiryDates(payload);
+  if (expiryError) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: expiryError });
 
   const missing = DOC_TYPES.filter((docType) => !firstFile(req.files, docType));
   if (missing.length) {
@@ -135,6 +188,8 @@ exports.update = asyncHandler(async (req, res) => {
   const payload = pickPayload(req.body);
   const mobileError = invalidMobile(payload);
   if (mobileError) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: mobileError });
+  const expiryError = invalidExpiryDates(payload);
+  if (expiryError) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: expiryError });
   if (payload.vehicleNumber && payload.vehicleNumber !== vehicle.vehicleNumber) {
     const clash = await Vehicle.findOne({ vehicleNumber: payload.vehicleNumber, _id: { $ne: vehicle._id } });
     if (clash) {
@@ -156,6 +211,9 @@ exports.update = asyncHandler(async (req, res) => {
     vehicle.documents = { ...(vehicle.documents ? vehicle.documents.toObject?.() || vehicle.documents : {}), ...uploaded };
   }
   await vehicle.save();
+
+  // Propagate driver/vehicle details to every linked bus route.
+  await syncLinkedBusRoutes(vehicle);
 
   logEntityUpdate({
     module: MODULE,

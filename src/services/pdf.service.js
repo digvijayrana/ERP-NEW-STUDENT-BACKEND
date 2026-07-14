@@ -255,7 +255,19 @@ exports.feeInvoicePdf = function feeInvoicePdf(res, invoice) {
     const amtCol = { x: LEFT + 14, w: W - 28, label: 'Amount', align: 'right' };
     let y = tableHeader(doc, [descCol, amtCol], doc.y);
 
-    invoice.items.forEach((item, i) => {
+    // Build display lines from stored items, but always surface Bus Fee when
+    // the invoice carries a busFee amount (older invoices may omit it from items).
+    const lineItems = Array.isArray(invoice.items) ? [...invoice.items] : [];
+    const hasBusLine = lineItems.some((item) => /bus\s*fee/i.test(String(item.label || '')));
+    if (!hasBusLine && Number(invoice.busFee) > 0) {
+      // Place bus fee after tuition when present, otherwise append.
+      const tuitionIdx = lineItems.findIndex((item) => /tuition/i.test(String(item.label || '')));
+      const busLine = { label: 'Bus Fee', amount: invoice.busFee };
+      if (tuitionIdx >= 0) lineItems.splice(tuitionIdx + 1, 0, busLine);
+      else lineItems.push(busLine);
+    }
+
+    lineItems.forEach((item, i) => {
       y = tableDataRow(doc, [
         { text: item.label, x: LEFT + 14, w: W - 140 },
         { text: rupees(item.amount), x: LEFT + 14, w: W - 28, align: 'right' }
