@@ -677,3 +677,125 @@ exports.moduleReportPdf = function moduleReportPdf(res, domain, reportType, rows
   }
   return genericTablePdf(res, `${domain}-${reportType}.pdf`, config.title, config.headers, rows, config.map);
 };
+
+/**
+ * Export an AI timetable plan as a weekly calendar PDF (one class per page when filtered).
+ */
+exports.timetablePlanPdf = function timetablePlanPdf(res, plan, options = {}) {
+  const days = plan.workingDays?.length
+    ? plan.workingDays
+    : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const periods = (plan.periods || []).slice().sort((a, b) => a.index - b.index);
+  const slots = plan.slots || [];
+
+  const classMap = new Map();
+  for (const slot of slots) {
+    if (slot.slotType === 'break') continue;
+    const id = String(slot.classRoom?._id || slot.classRoom || '');
+    if (!id) continue;
+    if (options.classRoomId && id !== String(options.classRoomId)) continue;
+    if (!classMap.has(id)) {
+      const room = slot.classRoom;
+      const label =
+        room && typeof room === 'object'
+          ? `${room.name || ''}${room.section ? `-${room.section}` : ''}`.trim()
+          : id;
+      classMap.set(id, { label, slots: [] });
+    }
+    classMap.get(id).slots.push(slot);
+  }
+
+  const classes = [...classMap.entries()];
+  if (!classes.length) {
+    return pipePdf(res, 'timetable-plan.pdf', (doc) => {
+      headerBlock(doc);
+      docTitle(doc, 'AI Timetable Plan', plan.name || 'Empty plan');
+      doc.fontSize(11).fillColor(C.MUTED).text('No scheduled periods to export.', LEFT, doc.y + 12);
+      footerBlock(doc);
+    });
+  }
+
+  const dayShort = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat' };
+
+  pipePdf(res, `timetable-${(plan.name || 'plan').replace(/\s+/g, '-').toLowerCase()}.pdf`, (doc) => {
+    classes.forEach(([classId, pack], pageIndex) => {
+      if (pageIndex > 0) doc.addPage();
+      headerBlock(doc);
+      docTitle(
+        doc,
+        `Timetable — ${pack.label}`,
+        `${plan.name || 'AI Plan'} · ${plan.academicYear?.name || ''} · Score ${plan.stats?.score ?? '—'}%`
+      );
+
+      const labelW = 72;
+      const colW = (W - labelW) / days.length;
+      let y = doc.y + 8;
+
+      // Header row
+      doc.rect(LEFT, y, W, 22).fill(C.NAVY);
+      doc.fillColor(C.WHITE).fontSize(8).font('Helvetica-Bold');
+      doc.text('Period', LEFT + 4, y + 7, { width: labelW - 8, align: 'left' });
+      days.forEach((day, i) => {
+        doc.text(dayShort[day] || day, LEFT + labelW + i * colW + 2, y + 7, { width: colW - 4, align: 'center' });
+      });
+      y += 22;
+
+      for (const period of periods) {
+        const rowH = period.type === 'break' ? 18 : 36;
+        if (y + rowH > PAGE_H - 60) {
+          doc.addPage();
+          headerBlock(doc);
+          y = doc.y + 8;
+        }
+
+        if (period.type === 'break') {
+          doc.rect(LEFT, y, W, rowH).fill(C.ORANGE_SOFT);
+          doc.fillColor(C.ORANGE).fontSize(8).font('Helvetica-Bold');
+          doc.text(`${period.label} (${period.startTime}–${period.endTime})`, LEFT + 4, y + 5, {
+            width: W - 8,
+            align: 'center'
+          });
+          y += rowH;
+          continue;
+        }
+
+        doc.rect(LEFT, y, W, rowH).stroke(C.BORDER);
+        doc.rect(LEFT, y, labelW, rowH).fill(C.ICE).stroke(C.BORDER);
+        doc.fillColor(C.TEXT).fontSize(7).font('Helvetica-Bold');
+        doc.text(`P${period.index}`, LEFT + 4, y + 6, { width: labelW - 8 });
+        doc.font('Helvetica').fillColor(C.MUTED).fontSize(6);
+        doc.text(`${period.startTime}-${period.endTime}`, LEFT + 4, y + 16, { width: labelW - 8 });
+
+        days.forEach((day, i) => {
+          const x = LEFT + labelW + i * colW;
+          doc.rect(x, y, colW, rowH).stroke(C.BORDER);
+          const cell = pack.slots.find((s) => s.dayOfWeek === day && s.periodIndex === period.index);
+          if (!cell) return;
+          const teacher =
+            cell.teacher && typeof cell.teacher === 'object'
+              ? [cell.teacher.firstName, cell.teacher.lastName].filter(Boolean).join(' ')
+              : '';
+          doc.fillColor(C.TEXT).fontSize(6.5).font('Helvetica-Bold');
+          doc.text(cell.subject || '', x + 2, y + 4, { width: colW - 4, ellipsis: true });
+          doc.font('Helvetica').fillColor(C.MUTED).fontSize(5.5);
+          doc.text(teacher || cell.room || cell.slotType || '', x + 2, y + 16, { width: colW - 4, ellipsis: true });
+        });
+
+        y += rowH;
+      }
+
+      if ((plan.conflicts || []).length) {
+        y += 12;
+        doc.fillColor(C.RED).fontSize(9).font('Helvetica-Bold').text('Conflicts', LEFT, y);
+        y += 14;
+        doc.font('Helvetica').fontSize(7).fillColor(C.TEXT);
+        for (const c of (plan.conflicts || []).slice(0, 8)) {
+          doc.text(`• [${c.severity}] ${c.message}`, LEFT, y, { width: W });
+          y += 11;
+        }
+      }
+
+      footerBlock(doc);
+    });
+  });
+};

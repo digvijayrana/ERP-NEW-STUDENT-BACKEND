@@ -281,9 +281,100 @@ You will be prompted to change your password after logging in.`,
   });
 }
 
+async function sendFeePaymentReminder({
+  to,
+  parentName,
+  studentName,
+  admissionNumber,
+  amount,
+  riskCategory,
+  latePaymentProbability,
+  bodyText
+}) {
+  const schoolName = schoolBranding().name || 'School';
+  const amountLabel = `₹${Number(amount || 0).toLocaleString('en-IN')}`;
+  const detailsBox = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${THEME.soft};border:1px solid ${THEME.border};border-radius:12px;overflow:hidden;">
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;letter-spacing:.5px;width:42%;border-bottom:1px solid ${THEME.border};">Student</td>
+        <td style="padding:12px 16px;font-size:15px;font-weight:700;color:${THEME.text};border-bottom:1px solid ${THEME.border};">${escapeHtml(studentName)}${admissionNumber ? ` (${escapeHtml(admissionNumber)})` : ''}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid ${THEME.border};">Outstanding</td>
+        <td style="padding:12px 16px;font-size:15px;font-weight:700;color:${THEME.strong};border-bottom:1px solid ${THEME.border};">${escapeHtml(amountLabel)}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;letter-spacing:.5px;">Risk signal</td>
+        <td style="padding:12px 16px;font-size:14px;font-weight:600;color:${THEME.text};">${escapeHtml(String(riskCategory || 'medium').toUpperCase())} · Late payment likelihood ${escapeHtml(String(latePaymentProbability || 0))}%</td>
+      </tr>
+    </table>`;
+
+  return deliver({
+    to,
+    subject: `Fee payment reminder — ${studentName || 'Student'} | ${schoolName}`,
+    text: bodyText || `Dear ${parentName || 'Parent'}, please clear pending fees of ${amountLabel} for ${studentName}.`,
+    html: renderEmail({
+      heading: 'Fee payment reminder',
+      intro: `Dear ${escapeHtml(parentName) || 'Parent / Guardian'}, this is a reminder regarding pending school fees.`,
+      bodyHtml: detailsBox,
+      cta: { url: clientBaseUrl().replace(/\/+$/, ''), label: 'Open Parent Portal' },
+      note: 'Please ignore this message if payment has already been made. For help, contact the school office.'
+    })
+  });
+}
+
+async function sendAdmissionLeadNotification({
+  to,
+  parentName,
+  childName,
+  leadCode,
+  stage,
+  applyingClass,
+  feeTotal,
+  message
+}) {
+  const schoolName = schoolBranding().name || 'School';
+  const feeLabel = feeTotal != null ? `₹${Number(feeTotal).toLocaleString('en-IN')}` : '—';
+  const detailsBox = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${THEME.soft};border:1px solid ${THEME.border};border-radius:12px;overflow:hidden;">
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;width:40%;border-bottom:1px solid ${THEME.border};">Inquiry</td>
+        <td style="padding:12px 16px;font-weight:700;border-bottom:1px solid ${THEME.border};">${escapeHtml(leadCode || '')}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;border-bottom:1px solid ${THEME.border};">Child</td>
+        <td style="padding:12px 16px;font-weight:700;border-bottom:1px solid ${THEME.border};">${escapeHtml(childName || '')}${applyingClass ? ` · Class ${escapeHtml(applyingClass)}` : ''}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;border-bottom:1px solid ${THEME.border};">Stage</td>
+        <td style="padding:12px 16px;font-weight:600;border-bottom:1px solid ${THEME.border};">${escapeHtml(String(stage || '').replace(/_/g, ' '))}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;font-size:12px;color:${THEME.muted};text-transform:uppercase;">Fee estimate</td>
+        <td style="padding:12px 16px;font-weight:700;color:${THEME.strong};">${escapeHtml(feeLabel)}</td>
+      </tr>
+    </table>
+    ${message ? `<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:${THEME.text};">${escapeHtml(message)}</p>` : ''}`;
+
+  return deliver({
+    to,
+    subject: `Admission update — ${childName || 'your child'} | ${schoolName}`,
+    text: `Dear ${parentName || 'Parent'}, your admission inquiry ${leadCode} is now at stage: ${stage}.`,
+    html: renderEmail({
+      heading: 'Admission inquiry update',
+      intro: `Dear ${escapeHtml(parentName) || 'Parent / Guardian'}, here is an update on your admission inquiry with ${escapeHtml(schoolName)}.`,
+      bodyHtml: detailsBox,
+      cta: { url: clientBaseUrl().replace(/\/+$/, ''), label: 'Visit school portal' },
+      note: 'Reply to this email or visit the school office for the next steps.'
+    })
+  });
+}
+
 module.exports = {
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPasswordResetOtp,
-  sendStudentCredentials
+  sendStudentCredentials,
+  sendFeePaymentReminder,
+  sendAdmissionLeadNotification
 };
