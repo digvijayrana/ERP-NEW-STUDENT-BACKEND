@@ -4,7 +4,7 @@ module.exports = {
     HOST: '0.0.0.0',
     JWT_SECRET_FALLBACK: 'change-this-secret',
     JWT_EXPIRES_IN: '30m',
-    MONGODB_URI: 'mongodb+srv://digvijayrana0696:ranathakur@cluster0.mlh1sas.mongodb.net/newERPSystem?authSource=admin&replicaSet=atlas-146mlx-shard-0&readPreference=primary&ssl=true',
+    MONGODB_URI: 'mongodb://127.0.0.1:27017/student_erp',
     CLIENT_URL: 'http://localhost:4200',
     DEV_CLIENT_URL: 'http://localhost:3000',
     NODE_ENV: 'development',
