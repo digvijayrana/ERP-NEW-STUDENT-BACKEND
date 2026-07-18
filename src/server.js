@@ -1,5 +1,11 @@
-const app = require('./app');
 const connectDb = require('./config/db');
+const {
+  connectControlPlane,
+  installTenantModelProxies,
+  isMultiTenant,
+  bindModelsToConnection,
+  getControlPlaneConnection
+} = require('./services/tenantConnection.manager');
 const { createLogger } = require('./utils/logger');
 const { checkStorageHealth, getStorageInfo } = require('./services/documentStorage.service');
 const { autoGenerateCurrentMonthDemands } = require('./services/fee.service');
@@ -13,7 +19,20 @@ const host = process.env.HOST || DEFAULTS.HOST;
 
 async function startServer(portToUse) {
   try {
+    if (isMultiTenant()) {
+      await connectControlPlane();
+    }
     await connectDb();
+
+    // Load models, then wrap them for Host-based DB routing (before controllers load)
+    require('./models/loadAll');
+    installTenantModelProxies();
+    if (isMultiTenant() && getControlPlaneConnection()) {
+      bindModelsToConnection(getControlPlaneConnection());
+    }
+
+    const app = require('./app');
+
     ensureWorker();
     startAttendanceAutoCloseScheduler();
 
@@ -36,10 +55,13 @@ async function startServer(portToUse) {
     const server = app.listen(portToUse, host, () => {
       log.info(`Student ERP API is running`, {
         url: `http://${host}:${portToUse}`,
-        env: process.env.NODE_ENV || DEFAULTS.NODE_ENV
+        env: process.env.NODE_ENV || DEFAULTS.NODE_ENV,
+        multiTenant: isMultiTenant(),
+        rootDomain: process.env.ROOT_DOMAIN || 'schoolerp.local'
       });
 
       setImmediate(async () => {
+        if (isMultiTenant()) return; // skip global fee job; per-tenant workers later
         const feeResult = await autoGenerateCurrentMonthDemands();
         if (feeResult.created > 0) {
           log.info('Auto-generated monthly fee demands', feeResult);
@@ -60,7 +82,7 @@ async function startServer(portToUse) {
       process.exit(1);
     });
   } catch (error) {
-    log.error('Failed to initialize server', { error: error.message });
+    log.error('Failed to initialize server', { error: error.message, stack: error.stack });
     process.exit(1);
   }
 }

@@ -487,13 +487,27 @@ async function updatePlanConfig(planId, payload = {}) {
     plan.workingDays = payload.workingDays.filter((d) => DAYS.includes(d));
   }
   if (Array.isArray(payload.periods) && payload.periods.length) {
-    plan.periods = payload.periods.map((p, i) => ({
+    const periods = payload.periods.map((p, i) => ({
       index: Number(p.index ?? i + 1),
-      label: p.label || `Period ${i + 1}`,
-      startTime: p.startTime,
-      endTime: p.endTime,
+      label: String(p.label || `Period ${i + 1}`).trim(),
+      startTime: String(p.startTime || ''),
+      endTime: String(p.endTime || ''),
       type: ['teaching', 'break', 'assembly'].includes(p.type) ? p.type : 'teaching'
     }));
+    if (periods.some((p) => !p.startTime || !p.endTime || p.startTime >= p.endTime)) {
+      throw Object.assign(new Error('Every period must have a valid start and end time'), { status: 400 });
+    }
+    const sorted = [...periods].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    if (sorted.some((p, i) => i > 0 && p.startTime < sorted[i - 1].endTime)) {
+      throw Object.assign(new Error('Period times cannot overlap'), { status: 400 });
+    }
+    plan.periods = sorted.map((period, index) => ({ ...period, index: index + 1 }));
+    // Existing slot indexes no longer safely map to the edited bell schedule.
+    plan.slots = [];
+    plan.unplaced = [];
+    plan.conflicts = [];
+    plan.stats = { placed: 0, unplaced: 0, conflictCount: 0, teachingSlots: 0, score: 0 };
+    plan.generatedAt = undefined;
   }
   if (Array.isArray(payload.facilities)) {
     plan.facilities = payload.facilities.map((f) => ({
@@ -894,6 +908,15 @@ async function listTeachersForAvailability() {
     .lean();
 }
 
+async function listClassesForPlan(plan) {
+  const academicYear = tid(plan?.academicYear);
+  if (!academicYear) return [];
+  return ClassRoom.find({ academicYear, status: 'active' })
+    .select('name section')
+    .sort({ name: 1, section: 1 })
+    .lean();
+}
+
 module.exports = {
   DAYS,
   DEFAULT_PERIODS,
@@ -909,5 +932,6 @@ module.exports = {
   buildDashboard,
   populatePlan,
   listTeachersForAvailability,
+  listClassesForPlan,
   resolveAcademicYear
 };

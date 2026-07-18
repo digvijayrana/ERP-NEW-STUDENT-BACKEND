@@ -11,6 +11,7 @@ const {
   buildDashboard,
   populatePlan,
   listTeachersForAvailability,
+  listClassesForPlan,
   resolveAcademicYear
 } = require('../services/timetableGenerator.service');
 const TimetablePlan = require('../models/TimetablePlan');
@@ -28,9 +29,13 @@ exports.dashboard = asyncHandler(async (req, res) => {
       academicYear: req.query.academicYear || undefined,
       userId: req.user?._id
     });
-    const teachers = await listTeachersForAvailability();
+    const [teachers, classes] = await Promise.all([
+      listTeachersForAvailability(),
+      listClassesForPlan(plan)
+    ]);
     const dashboard = buildDashboard(plan);
     dashboard.teachers = teachers;
+    dashboard.classes = classes;
     res.json(dashboard);
   } catch (error) {
     res.status(statusFrom(error)).json({ message: error.message });

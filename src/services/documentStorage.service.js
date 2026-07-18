@@ -53,9 +53,14 @@ function s3Credentials() {
 }
 
 function ensureUploadsDir() {
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    log.info('Created local uploads directory', { path: UPLOADS_DIR });
+  try {
+    if (!fs.existsSync(UPLOADS_DIR)) {
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      log.info('Created local uploads directory', { path: UPLOADS_DIR });
+    }
+  } catch (error) {
+    // Non-root containers may lack write access until the image creates the dir
+    log.warn('Could not ensure uploads directory', { path: UPLOADS_DIR, error: error.message });
   }
 }
 

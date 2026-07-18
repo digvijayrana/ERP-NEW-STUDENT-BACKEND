@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(require('./health.routes'));
+router.use('/public', require('./public.routes'));
 router.use('/auth', require('./auth.routes'));
 router.use('/admission-assistant', require('./admissionAssistant.routes'));
 router.use(authenticate);

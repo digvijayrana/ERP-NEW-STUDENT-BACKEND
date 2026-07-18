@@ -737,10 +737,19 @@ async function listLeads({ stage, q, limit = 100 } = {}) {
 }
 
 async function pipelineBoard() {
-  const stages = AdmissionLead.PIPELINE_STAGES || require('../models/AdmissionLead').PIPELINE_STAGES;
-  const leads = await AdmissionLead.find({
-    stage: { $nin: [] }
-  })
+  const stages =
+    AdmissionLead.PIPELINE_STAGES ||
+    require('../models/AdmissionLead').PIPELINE_STAGES || [
+      'new',
+      'contacted',
+      'qualified',
+      'documents_pending',
+      'interview_scheduled',
+      'scholarship_review',
+      'converted',
+      'lost'
+    ];
+  const leads = await AdmissionLead.find({})
     .sort({ lastActivityAt: -1 })
     .limit(300)
     .lean();
@@ -822,7 +831,6 @@ async function dashboard() {
     pipeline: board,
     analytics: stats,
     recentLeads: recent,
-    faqs: FAQ.map(({ id, question, answer }) => ({ id, question, answer })),
     classOptions: CLASS_OPTIONS
   };
 }
