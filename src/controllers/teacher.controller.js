@@ -20,7 +20,8 @@ const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
 const { maskTeacherRecord } = require('../utils/dataMasking');
 const { logDocumentAccess } = require('../services/activityLog.service');
-const { issueAccessToken, validateAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
+const { issueAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
+const { teacherDocumentTokenMatches } = require('../middleware/documentAccess.middleware');
 
 const TEACHER_SORT_FIELDS = ['firstName', 'employeeCode', 'phone', 'baseSalary', 'status', 'createdAt'];
 const log = createLogger('teachers');
@@ -379,23 +380,7 @@ exports.streamDocument = asyncHandler(async (req, res) => {
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
 
   const docType = req.params.docType;
-  const entry = req.documentAccessEntry;
-  const tokenValid = Boolean(
-    entry
-    && entry.resourceType === 'teacher'
-    && entry.resourceId === String(teacher._id)
-    && entry.documentId === String(docType)
-  ) || (
-    req.query.accessToken
-    && validateAccessToken(String(req.query.accessToken), {
-      userId: req.user._id || req.user.id,
-      resourceType: 'teacher',
-      resourceId: teacher._id,
-      documentId: docType
-    })
-  );
-
-  if (!tokenValid) {
+  if (!teacherDocumentTokenMatches(req, teacher._id, docType)) {
     if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
       return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
     }

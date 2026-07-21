@@ -29,7 +29,11 @@ const { assertOptimisticVersion } = require('../utils/optimisticLock');
 const { invalidateNamespace } = require('../services/cache.service');
 const { maskStudentRecord } = require('../utils/dataMasking');
 const { logDocumentAccess } = require('../services/activityLog.service');
-const { issueAccessToken, validateAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
+const { issueAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
+const {
+  ensureStudentDocumentAccess,
+  studentDocumentTokenMatches
+} = require('../middleware/documentAccess.middleware');
 
 const STUDENT_SORT_FIELDS = ['admissionNumber', 'firstName', 'admissionDate', 'status', 'createdAt'];
 
@@ -590,33 +594,6 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
   res.json({ message: `Document ${doc.status}`, documents: student.documents });
 });
 
-async function ensureStudentDocumentAccess(req, student) {
-  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
-    const error = new Error('Students can only access their own documents');
-    error.status = HTTP_STATUS.FORBIDDEN;
-    throw error;
-  }
-  if (req.user.role === ROLES.PARENT) {
-    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
-    if (!childIds.includes(req.params.id)) {
-      const error = new Error('Parents can only access their linked child documents');
-      error.status = HTTP_STATUS.FORBIDDEN;
-      throw error;
-    }
-  }
-  if (req.user.role === ROLES.TEACHER) {
-    const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
-    const canAccess = student.enrollments.some((enrollment) =>
-      classIds.some((id) => id.equals(enrollment.classRoom?._id || enrollment.classRoom))
-    );
-    if (!canAccess) {
-      const error = new Error('Teacher can only access assigned class student documents');
-      error.status = HTTP_STATUS.FORBIDDEN;
-      throw error;
-    }
-  }
-}
-
 exports.getDocumentUrl = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
@@ -649,23 +626,7 @@ exports.streamDocument = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
-  const entry = req.documentAccessEntry;
-  const tokenValid = Boolean(
-    entry
-    && entry.resourceType === 'student'
-    && entry.resourceId === String(student._id)
-    && entry.documentId === String(req.params.documentId)
-  ) || (
-    req.query.accessToken
-    && validateAccessToken(String(req.query.accessToken), {
-      userId: req.user._id || req.user.id,
-      resourceType: 'student',
-      resourceId: student._id,
-      documentId: req.params.documentId
-    })
-  );
-
-  if (!tokenValid) {
+  if (!studentDocumentTokenMatches(req, student._id, req.params.documentId)) {
     await ensureStudentDocumentAccess(req, student);
   }
 

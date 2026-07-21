@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const controller = require('../controllers/student.controller');
 const { requirePermission } = require('../middleware/auth');
+const { studentDocumentFileAccess } = require('../middleware/documentAccess.middleware');
 const upload = require('../middleware/upload');
 
 const admissionUpload = upload.fields([
@@ -9,20 +10,6 @@ const admissionUpload = upload.fields([
   { name: 'birthCertificate', maxCount: 1 },
   { name: 'otherDocuments', maxCount: 10 }
 ]);
-
-/** Allow JWT+permission, or a valid signed document accessToken for this file. */
-const studentDocumentFileAccess = (req, res, next) => {
-  const entry = req.documentAccessEntry;
-  if (
-    entry
-    && entry.resourceType === 'student'
-    && entry.resourceId === String(req.params.id)
-    && entry.documentId === String(req.params.documentId)
-  ) {
-    return next();
-  }
-  return requirePermission('students', 'view')(req, res, next);
-};
 
 router.post('/admissions', requirePermission('students', 'create'), admissionUpload, controller.createAdmission);
 router.post('/promotions', requirePermission('students', 'edit'), controller.promote);
