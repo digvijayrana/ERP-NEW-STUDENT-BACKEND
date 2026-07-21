@@ -26,12 +26,12 @@ const log = createLogger('app');
 const app = express();
 
 app.disable('x-powered-by');
-// Trust Cloudflare → ALB → Nginx hop count (override with TRUST_PROXY)
-app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
+// Direct browser → API by default (set TRUST_PROXY only if you add a reverse proxy later)
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 0));
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false // SPA + API; CSP terminated at Nginx for HTML
+  contentSecurityPolicy: false
 }));
 
 const allowedOrigins = [

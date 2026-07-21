@@ -11,7 +11,6 @@ const MODULES = [
   'attendance',
   'fees',
   'fee_prediction',
-  'admission_assistant',
   'timetable_generator',
   'payroll',
   'timetable',
@@ -59,7 +58,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
       attendance: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
       fees: { view: true, create: true, edit: true, export: true, print: true, unlock: true },
       fee_prediction: { view: true, create: true, export: true },
-      admission_assistant: { view: true, create: true, edit: true, export: true },
       timetable_generator: { view: true, create: true, edit: true, approve: true, print: true, export: true },
       payroll: { view: true, create: true, edit: true, export: true, print: true, approve: true, unlock: true },
       timetable: { view: true, create: true, edit: true, print: true },
@@ -84,7 +82,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
       attendance: { view: true, export: true, print: true, unlock: true },
       fees: { view: true, export: true, print: true },
       fee_prediction: { view: true, export: true },
-      admission_assistant: { view: true, export: true },
       timetable_generator: { view: true, create: true, edit: true, approve: true, print: true, export: true },
       payroll: { view: true, export: true, print: true, approve: true },
       timetable: { view: true, print: true },
@@ -143,7 +140,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
       classes: { view: true },
       students: { view: true, create: true, edit: true, export: true, print: true },
       teachers: { view: true },
-      admission_assistant: { view: true, create: true, edit: true },
       transport: { view: true, create: true, edit: true },
       drivers: { view: true }
     })
@@ -157,7 +153,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
       classes: { view: true },
       students: { view: true, create: true, edit: true, export: true, print: true },
       teachers: { view: true },
-      admission_assistant: { view: true, create: true, edit: true },
       transport: { view: true, create: true, edit: true },
       drivers: { view: true }
     })

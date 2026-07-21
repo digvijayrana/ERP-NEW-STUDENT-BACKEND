@@ -3,10 +3,14 @@ const { HTTP_STATUS } = require('../constants');
 const { timetablePlanPdf } = require('../services/pdf.service');
 const {
   getOrCreatePlan,
+  reopenPlanForEdit,
+  resetPlan,
   updatePlanConfig,
   generateTimetable,
   validatePlan,
   moveSlot,
+  updateSlot,
+  assignSlot,
   applyPlan,
   buildDashboard,
   populatePlan,
@@ -108,6 +112,78 @@ exports.moveSlot = asyncHandler(async (req, res) => {
     res.json(buildDashboard(plan));
   } catch (error) {
     res.status(statusFrom(error)).json({ message: error.message, conflicts: error.conflicts });
+  }
+});
+
+exports.updateSlot = asyncHandler(async (req, res) => {
+  try {
+    const plan = await updateSlot(req.params.id, {
+      slotId: req.body?.slotId || req.params.slotId,
+      subject: req.body?.subject,
+      teacher: req.body?.teacher,
+      room: req.body?.room,
+      slotType: req.body?.slotType
+    });
+    const teachers = await listTeachersForAvailability();
+    const classes = await listClassesForPlan(plan);
+    const dashboard = buildDashboard(plan);
+    dashboard.teachers = teachers;
+    dashboard.classes = classes;
+    res.json(dashboard);
+  } catch (error) {
+    res.status(statusFrom(error)).json({ message: error.message, conflicts: error.conflicts });
+  }
+});
+
+exports.assignSlot = asyncHandler(async (req, res) => {
+  try {
+    const plan = await assignSlot(req.params.id, {
+      classRoom: req.body?.classRoom,
+      dayOfWeek: req.body?.dayOfWeek,
+      periodIndex: req.body?.periodIndex,
+      subject: req.body?.subject,
+      teacher: req.body?.teacher,
+      room: req.body?.room,
+      slotType: req.body?.slotType
+    });
+    const teachers = await listTeachersForAvailability();
+    const classes = await listClassesForPlan(plan);
+    const dashboard = buildDashboard(plan);
+    dashboard.teachers = teachers;
+    dashboard.classes = classes;
+    res.json(dashboard);
+  } catch (error) {
+    res.status(statusFrom(error)).json({ message: error.message, conflicts: error.conflicts });
+  }
+});
+
+exports.reopenForEdit = asyncHandler(async (req, res) => {
+  try {
+    const plan = await reopenPlanForEdit(req.params.id);
+    const teachers = await listTeachersForAvailability();
+    const classes = await listClassesForPlan(plan);
+    const dashboard = buildDashboard(plan);
+    dashboard.teachers = teachers;
+    dashboard.classes = classes;
+    res.json(dashboard);
+  } catch (error) {
+    res.status(statusFrom(error)).json({ message: error.message });
+  }
+});
+
+exports.resetPlan = asyncHandler(async (req, res) => {
+  try {
+    const plan = await resetPlan(req.params.id, {
+      classRoom: req.body?.classRoom || req.query?.classRoom
+    });
+    const teachers = await listTeachersForAvailability();
+    const classes = await listClassesForPlan(plan);
+    const dashboard = buildDashboard(plan);
+    dashboard.teachers = teachers;
+    dashboard.classes = classes;
+    res.json(dashboard);
+  } catch (error) {
+    res.status(statusFrom(error)).json({ message: error.message });
   }
 });
 

@@ -440,11 +440,33 @@ async function getOrCreatePlan({ academicYear, userId } = {}) {
   const year = await resolveAcademicYear(academicYear);
   if (!year) throw Object.assign(new Error('No academic year found'), { status: 400 });
 
-  let plan = await TimetablePlan.findOne({ academicYear: year._id, status: 'draft' }).sort({ updatedAt: -1 });
+  const draft = await TimetablePlan.findOne({ academicYear: year._id, status: 'draft' }).sort({ updatedAt: -1 });
+  const applied = await TimetablePlan.findOne({ academicYear: year._id, status: 'applied' }).sort({
+    updatedAt: -1
+  });
+
+  // Prefer a draft that still has timetable data. An empty draft left behind after
+  // publish must not hide the live applied plan on Refresh.
+  const draftHasSlots = (draft?.slots || []).length > 0;
+  const appliedHasSlots = (applied?.slots || []).length > 0;
+  let plan = null;
+  if (draft && draftHasSlots) {
+    plan = draft;
+  } else if (applied && appliedHasSlots) {
+    plan = applied;
+    if (draft && !draftHasSlots) {
+      await TimetablePlan.deleteOne({ _id: draft._id });
+    }
+  } else if (draft) {
+    plan = draft;
+  } else if (applied) {
+    plan = applied;
+  }
+
   if (!plan) {
     plan = await TimetablePlan.create({
       academicYear: year._id,
-      name: `AI Plan — ${year.name}`,
+      name: `School Timetable — ${year.name}`,
       status: 'draft',
       workingDays: [...DAYS],
       periods: DEFAULT_PERIODS,
@@ -460,6 +482,54 @@ async function getOrCreatePlan({ academicYear, userId } = {}) {
     });
   }
 
+  return populatePlan(plan._id);
+}
+
+/**
+ * Make an applied (live) plan editable again without clearing slots/teachers.
+ */
+async function reopenPlanForEdit(planId) {
+  const plan = await TimetablePlan.findById(planId);
+  if (!plan) throw Object.assign(new Error('Plan not found'), { status: 404 });
+
+  if (plan.status === 'draft') {
+    return populatePlan(plan._id);
+  }
+
+  // Drop any empty leftover drafts for the same year so dashboard stays on this plan.
+  await TimetablePlan.deleteMany({
+    academicYear: plan.academicYear,
+    status: 'draft',
+    _id: { $ne: plan._id },
+    $or: [{ slots: { $exists: false } }, { slots: { $size: 0 } }]
+  });
+
+  plan.status = 'draft';
+  await plan.save();
+  return populatePlan(plan._id);
+}
+
+/**
+ * Clear period assignments for one class/section only (keeps bell schedule
+ * and other classes). Used by the timetable Refresh action.
+ */
+async function resetPlan(planId, { classRoom } = {}) {
+  const plan = await TimetablePlan.findById(planId);
+  if (!plan) throw Object.assign(new Error('Plan not found'), { status: 404 });
+  if (!classRoom) {
+    throw Object.assign(new Error('Select a class to refresh'), { status: 400 });
+  }
+
+  const classId = tid(classRoom);
+  plan.status = 'draft';
+  plan.slots = (plan.slots || []).filter((slot) => tid(slot.classRoom) !== classId);
+  plan.unplaced = (plan.unplaced || []).filter((row) => tid(row.classRoom) !== classId);
+  plan.conflicts = detectConflicts(plan);
+  plan.stats = computeStats(plan);
+  if (!(plan.slots || []).length) {
+    plan.generatedAt = undefined;
+  }
+  await plan.save();
   return populatePlan(plan._id);
 }
 
@@ -745,8 +815,8 @@ async function moveSlot(planId, { slotId, targetDay, targetPeriodIndex, swap = t
   }
 
   const period = plan.periods.find((p) => p.index === periodIndex);
-  if (period?.type === 'break' && plan.constraints?.protectBreaks !== false) {
-    throw Object.assign(new Error('Cannot place a class during break time'), { status: 400 });
+  if ((period?.type === 'break' || period?.type === 'assembly') && plan.constraints?.protectBreaks !== false) {
+    throw Object.assign(new Error(`Cannot place a class during ${period.type} time`), { status: 400 });
   }
 
   const occupant = plan.slots.find(
@@ -782,6 +852,114 @@ async function moveSlot(planId, { slotId, targetDay, targetPeriodIndex, swap = t
     .populate('slots.teacher', 'firstName lastName employeeCode');
   refreshed.conflicts = detectConflicts(refreshed);
   refreshed.stats = computeStats(refreshed);
+  await refreshed.save();
+  return populatePlan(planId);
+}
+
+/**
+ * Edit subject / teacher / room on an existing generated slot.
+ */
+async function updateSlot(planId, { slotId, subject, teacher, room, slotType } = {}) {
+  const plan = await TimetablePlan.findById(planId);
+  if (!plan) throw Object.assign(new Error('Plan not found'), { status: 404 });
+  if (plan.status === 'applied') {
+    throw Object.assign(new Error('Cannot edit an applied plan'), { status: 400 });
+  }
+
+  const slot = plan.slots.id(slotId);
+  if (!slot) throw Object.assign(new Error('Slot not found'), { status: 404 });
+  if (slot.slotType === 'break' || slot.locked) {
+    throw Object.assign(new Error('Locked or break slots cannot be edited'), { status: 400 });
+  }
+
+  if (subject !== undefined) slot.subject = String(subject || '').trim();
+  if (room !== undefined) slot.room = String(room || '').trim();
+  if (teacher !== undefined) {
+    slot.teacher = teacher ? teacher : undefined;
+  }
+  if (slotType && ['subject', 'lab', 'sports', 'library', 'free'].includes(slotType)) {
+    slot.slotType = slotType;
+  }
+
+  await plan.save();
+  const refreshed = await TimetablePlan.findById(planId)
+    .populate('slots.classRoom', 'name section')
+    .populate('slots.teacher', 'firstName lastName employeeCode');
+  refreshed.conflicts = detectConflicts(refreshed);
+  refreshed.stats = computeStats(refreshed);
+  await refreshed.save();
+  return populatePlan(planId);
+}
+
+/**
+ * Create or update a teaching slot for class + day + period (manual assign).
+ */
+async function assignSlot(
+  planId,
+  { classRoom, dayOfWeek, periodIndex, subject, teacher, room, slotType } = {}
+) {
+  const plan = await TimetablePlan.findById(planId);
+  if (!plan) throw Object.assign(new Error('Plan not found'), { status: 404 });
+  if (plan.status === 'applied') {
+    throw Object.assign(new Error('Cannot edit an applied plan'), { status: 400 });
+  }
+
+  const day = String(dayOfWeek || '').toLowerCase();
+  const pIndex = Number(periodIndex);
+  if (!classRoom) throw Object.assign(new Error('Select a class'), { status: 400 });
+  if (!DAYS.includes(day)) throw Object.assign(new Error('Invalid day'), { status: 400 });
+  const period = (plan.periods || []).find((p) => Number(p.index) === pIndex);
+  if (!period) throw Object.assign(new Error('Invalid period'), { status: 400 });
+  if (period.type === 'break' || period.type === 'assembly') {
+    throw Object.assign(new Error(`Cannot assign a teacher during ${period.type}`), { status: 400 });
+  }
+
+  const subjectName = String(subject || '').trim();
+  if (!subjectName) throw Object.assign(new Error('Subject is required'), { status: 400 });
+  if (!teacher) throw Object.assign(new Error('Select a teacher for this period'), { status: 400 });
+
+  const type = ['subject', 'lab', 'sports', 'library', 'free'].includes(slotType) ? slotType : 'subject';
+  let slot = plan.slots.find(
+    (s) =>
+      tid(s.classRoom) === tid(classRoom) &&
+      s.dayOfWeek === day &&
+      Number(s.periodIndex) === pIndex
+  );
+
+  if (slot) {
+    if (slot.slotType === 'break' || slot.locked) {
+      throw Object.assign(new Error('This period is locked'), { status: 400 });
+    }
+    slot.subject = subjectName;
+    slot.teacher = teacher;
+    slot.room = String(room || '').trim();
+    slot.slotType = type === 'free' ? 'subject' : type;
+  } else {
+    plan.slots.push({
+      classRoom,
+      dayOfWeek: day,
+      periodIndex: pIndex,
+      subject: subjectName,
+      teacher,
+      room: String(room || '').trim(),
+      slotType: type === 'free' ? 'subject' : type,
+      locked: false
+    });
+  }
+
+  await plan.save();
+  const refreshed = await TimetablePlan.findById(planId)
+    .populate('slots.classRoom', 'name section')
+    .populate('slots.teacher', 'firstName lastName employeeCode');
+  refreshed.conflicts = detectConflicts(refreshed);
+  refreshed.stats = computeStats(refreshed);
+  refreshed.unplaced = (refreshed.unplaced || []).filter(
+    (row) =>
+      !(
+        tid(row.classRoom) === tid(classRoom) &&
+        String(row.subject || '').toLowerCase() === subjectName.toLowerCase()
+      )
+  );
   await refreshed.save();
   return populatePlan(planId);
 }
@@ -924,10 +1102,14 @@ module.exports = {
   detectConflicts,
   computeStats,
   getOrCreatePlan,
+  reopenPlanForEdit,
+  resetPlan,
   updatePlanConfig,
   generateTimetable,
   validatePlan,
   moveSlot,
+  updateSlot,
+  assignSlot,
   applyPlan,
   buildDashboard,
   populatePlan,
