@@ -6,7 +6,17 @@ const { ROLES } = require('../constants');
 
 // Teachers may read their OWN documents (ownership is enforced inside the
 // controller). Any other role must hold the teachers:view permission.
+// Signed document URLs (?accessToken=) skip role checks after token match.
 const teacherDocumentReadAccess = (req, res, next) => {
+  const entry = req.documentAccessEntry;
+  if (
+    entry
+    && entry.resourceType === 'teacher'
+    && entry.resourceId === String(req.params.id)
+    && (!req.params.docType || entry.documentId === String(req.params.docType))
+  ) {
+    return next();
+  }
   if (req.user && req.user.role === ROLES.TEACHER) return next();
   return requirePermission('teachers', 'view')(req, res, next);
 };

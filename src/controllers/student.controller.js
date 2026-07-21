@@ -29,7 +29,7 @@ const { assertOptimisticVersion } = require('../utils/optimisticLock');
 const { invalidateNamespace } = require('../services/cache.service');
 const { maskStudentRecord } = require('../utils/dataMasking');
 const { logDocumentAccess } = require('../services/activityLog.service');
-const { issueAccessToken, validateAccessToken, getAccessTtlSeconds } = require('../services/documentAccess.service');
+const { issueAccessToken, validateAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
 
 const STUDENT_SORT_FIELDS = ['admissionNumber', 'firstName', 'admissionDate', 'status', 'createdAt'];
 
@@ -632,7 +632,11 @@ exports.getDocumentUrl = asyncHandler(async (req, res) => {
     resourceId: student._id,
     documentId: doc._id
   });
-  const url = `${req.protocol}://${req.get('host')}/api/students/${req.params.id}/documents/${req.params.documentId}/file?accessToken=${accessToken}`;
+  const url = buildDocumentFileUrl(
+    req,
+    `/students/${req.params.id}/documents/${req.params.documentId}/file`,
+    accessToken
+  );
   res.json({
     url,
     fileName: doc.title,
@@ -645,13 +649,21 @@ exports.streamDocument = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
 
-  const accessToken = req.query.accessToken;
-  const tokenValid = accessToken && validateAccessToken(accessToken, {
-    userId: req.user._id || req.user.id,
-    resourceType: 'student',
-    resourceId: student._id,
-    documentId: req.params.documentId
-  });
+  const entry = req.documentAccessEntry;
+  const tokenValid = Boolean(
+    entry
+    && entry.resourceType === 'student'
+    && entry.resourceId === String(student._id)
+    && entry.documentId === String(req.params.documentId)
+  ) || (
+    req.query.accessToken
+    && validateAccessToken(String(req.query.accessToken), {
+      userId: req.user._id || req.user.id,
+      resourceType: 'student',
+      resourceId: student._id,
+      documentId: req.params.documentId
+    })
+  );
 
   if (!tokenValid) {
     await ensureStudentDocumentAccess(req, student);

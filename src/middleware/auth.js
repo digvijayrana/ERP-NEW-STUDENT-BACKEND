@@ -3,12 +3,35 @@ const User = require('../models/User');
 const asyncHandler = require('./asyncHandler');
 const { getPermissionsForRole, hasPermission } = require('../services/permission.service');
 const { validateSession } = require('../services/security.service');
+const { resolveAccessToken } = require('../services/documentAccess.service');
 const { DEFAULTS, HTTP_STATUS, ROLES } = require('../constants');
 
 const ADMIN_ROLES = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PRINCIPAL];
 
 function expandRoles(roles) {
   return roles.flatMap((role) => (role === ROLES.ADMIN ? ADMIN_ROLES : [role]));
+}
+
+async function attachUserFromDocumentAccessToken(req) {
+  const raw = req.query?.accessToken;
+  if (!raw) return false;
+
+  // Document tokens must only authenticate document file downloads, never other APIs.
+  const path = `${req.baseUrl || ''}${req.path || ''}`;
+  if (!/\/documents\/[^/]+\/file\/?$/.test(path) && !/\/documents\/[^/]+\/file\/?$/.test(req.path || '')) {
+    return false;
+  }
+
+  const entry = resolveAccessToken(String(raw));
+  if (!entry) return false;
+
+  const user = await User.findById(entry.userId).select('-passwordHash');
+  if (!user || !user.isActive) return false;
+
+  req.user = user;
+  req.permissions = await getPermissionsForRole(user.role);
+  req.documentAccessEntry = entry;
+  return true;
 }
 
 exports.authenticate = asyncHandler(async (req, res, next) => {
@@ -19,7 +42,12 @@ exports.authenticate = asyncHandler(async (req, res, next) => {
   const token = header.startsWith('Bearer ')
     ? header.slice(7)
     : (req.query && req.query.access_token ? String(req.query.access_token) : null);
-  if (!token) return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Authentication required' });
+
+  if (!token) {
+    // Short-lived signed document URLs use ?accessToken= (not JWT).
+    if (await attachUserFromDocumentAccessToken(req)) return next();
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Authentication required' });
+  }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || DEFAULTS.JWT_SECRET_FALLBACK);
@@ -40,8 +68,17 @@ exports.authenticate = asyncHandler(async (req, res, next) => {
 
     req.user = user;
     req.permissions = await getPermissionsForRole(user.role);
+
+    // Optional: also attach document access entry when both JWT and accessToken are present
+    if (req.query?.accessToken) {
+      const entry = resolveAccessToken(String(req.query.accessToken));
+      if (entry) req.documentAccessEntry = entry;
+    }
+
     next();
   } catch {
+    // JWT invalid — still allow a valid document accessToken (e.g. expired session, open signed link)
+    if (await attachUserFromDocumentAccessToken(req)) return next();
     res.status(HTTP_STATUS.UNAUTHORIZED).json({ message: 'Invalid or expired token' });
   }
 });
