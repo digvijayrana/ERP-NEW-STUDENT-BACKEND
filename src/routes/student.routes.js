@@ -10,6 +10,20 @@ const admissionUpload = upload.fields([
   { name: 'otherDocuments', maxCount: 10 }
 ]);
 
+/** Allow JWT+permission, or a valid signed document accessToken for this file. */
+const studentDocumentFileAccess = (req, res, next) => {
+  const entry = req.documentAccessEntry;
+  if (
+    entry
+    && entry.resourceType === 'student'
+    && entry.resourceId === String(req.params.id)
+    && entry.documentId === String(req.params.documentId)
+  ) {
+    return next();
+  }
+  return requirePermission('students', 'view')(req, res, next);
+};
+
 router.post('/admissions', requirePermission('students', 'create'), admissionUpload, controller.createAdmission);
 router.post('/promotions', requirePermission('students', 'edit'), controller.promote);
 router.get('/', requirePermission('students', 'view'), controller.list);
@@ -22,7 +36,7 @@ router.delete('/:id', requirePermission('students', 'deactivate'), controller.re
 router.post('/:id/documents', requirePermission('students', 'edit'), upload.single('document'), controller.addDocument);
 router.put('/:id/documents/:documentId', requirePermission('students', 'edit'), upload.single('document'), controller.replaceDocument);
 router.delete('/:id/documents/:documentId', requirePermission('students', 'edit'), controller.deleteDocument);
-router.get('/:id/documents/:documentId/file', requirePermission('students', 'view'), controller.streamDocument);
+router.get('/:id/documents/:documentId/file', studentDocumentFileAccess, controller.streamDocument);
 router.get('/:id/documents/:documentId/url', requirePermission('students', 'view'), controller.getDocumentUrl);
 router.post('/:id/verify-document', requirePermission('students', 'approve'), controller.verifyDocument);
 
