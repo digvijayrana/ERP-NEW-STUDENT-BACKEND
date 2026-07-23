@@ -8,7 +8,8 @@ const {
   updatePayroll,
   markPayrollPaid,
   removePayroll,
-  unlockPayroll
+  unlockPayroll,
+  previewPayroll
 } = require('../services/payroll.service');
 const { logEntityUpdate } = require('../services/activityLog.service');
 const { assertReversalAllowed, logUnlock } = require('../services/businessRules.service');
@@ -47,6 +48,18 @@ exports.create = asyncHandler(async (req, res) => {
   });
 
   res.status(HTTP_STATUS.CREATED).json(payroll);
+});
+
+exports.preview = asyncHandler(async (req, res) => {
+  const { teacher, month, year } = req.query;
+  if (!teacher || !month || !year) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      message: 'teacher, month and year are required',
+      code: 'BAD_REQUEST'
+    });
+  }
+  const preview = await previewPayroll(teacher, month, year);
+  res.json(preview);
 });
 
 exports.list = asyncHandler(async (req, res) => {

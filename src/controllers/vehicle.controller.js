@@ -269,29 +269,63 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.streamDocument = asyncHandler(async (req, res) => {
-  const { docType } = req.params;
-  if (!DOC_TYPES.includes(docType)) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Unknown document type' });
-  }
+  try {
+    const { docType } = req.params;
+    if (!DOC_TYPES.includes(docType)) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'Unknown document type',
+        code: 'INVALID_DOC_TYPE'
+      });
+    }
 
-  const vehicle = await Vehicle.findById(req.params.id);
-  if (!vehicle) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Vehicle not found' });
+    const vehicle = await Vehicle.findById(req.params.id);
+    if (!vehicle) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Vehicle not found',
+        code: 'NOT_FOUND'
+      });
+    }
 
-  const doc = vehicle.documents?.[docType];
-  if (!doc?.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+    const doc = vehicle.documents?.[docType];
+    if (!doc?.url) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Document not found',
+        code: 'NOT_FOUND'
+      });
+    }
 
-  const key = extractStorageKey(doc.url, doc.storageKey);
-  if (!key) return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document storage key not found' });
+    const key = extractStorageKey(doc.url, doc.storageKey);
+    if (!key) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'Document storage key not found',
+        code: 'MISSING_STORAGE_KEY'
+      });
+    }
 
-  const provider = doc.url.startsWith('local://') ? 'local' : 's3';
-  const { body, contentType } = await readDocument(key, provider);
-  const fileName = (doc.originalName || docType).replace(/[^\w.\-() ]/g, '_');
-  const disposition = req.query.download === '1' ? 'attachment' : 'inline';
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
-  if (body.pipe) {
-    body.pipe(res);
-  } else {
-    res.end(body);
+    try {
+      const provider = doc.url.startsWith('local://') ? 'local' : 's3';
+      const { body, contentType } = await readDocument(key, provider);
+      const fileName = (doc.originalName || docType).replace(/[^\w.\-() ]/g, '_');
+      const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+      if (body.pipe) {
+        body.pipe(res);
+      } else {
+        res.end(body);
+      }
+    } catch (storageError) {
+      const status = storageError.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
+      return res.status(status).json({
+        message: storageError.message || 'Unable to read vehicle document from storage',
+        code: storageError.code || 'STORAGE_ERROR'
+      });
+    }
+  } catch (error) {
+    const status = error.status || error.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
+    return res.status(status).json({
+      message: error.message || 'Failed to stream vehicle document',
+      code: error.code || 'DOCUMENT_STREAM_ERROR'
+    });
   }
 });

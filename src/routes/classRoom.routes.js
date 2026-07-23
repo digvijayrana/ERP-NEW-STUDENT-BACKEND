@@ -1,11 +1,11 @@
 const router = require('express').Router();
 const controller = require('../controllers/classRoom.controller');
-const { requirePermission } = require('../middleware/auth');
+const { classes } = require('../middleware');
 
-router.post('/', requirePermission('classes', 'create'), controller.create);
-router.get('/', requirePermission('classes', 'view'), controller.list);
-router.patch('/:id', requirePermission('classes', 'edit'), controller.update);
-router.post('/:id/toggle-status', requirePermission('classes', 'deactivate'), controller.toggleStatus);
-router.delete('/:id', requirePermission('classes', 'deactivate'), controller.remove);
+router.post('/', classes.create, controller.create);
+router.get('/', classes.view, controller.list);
+router.patch('/:id', classes.edit, controller.update);
+router.post('/:id/toggle-status', classes.deactivate, controller.toggleStatus);
+router.delete('/:id', classes.deactivate, controller.remove);
 
 module.exports = router;

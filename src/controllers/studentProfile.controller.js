@@ -1,4 +1,3 @@
-const ClassRoom = require('../models/ClassRoom');
 const ExamSubmission = require('../models/ExamSubmission');
 const FeeInvoice = require('../models/FeeInvoice');
 const Student = require('../models/Student');
@@ -10,7 +9,7 @@ const {
   buildFeeSummary,
   buildActivityTimeline
 } = require('../services/studentProfile.service');
-const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
+const { HTTP_STATUS, PAGINATION } = require('../constants');
 const { maskStudentRecord } = require('../utils/dataMasking');
 
 const log = createLogger('students');
@@ -47,27 +46,8 @@ function mandatoryDocumentStatus(documents = []) {
   };
 }
 
-async function assertStudentAccess(req, studentId) {
-  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== studentId) {
-    return { error: 'Students can only access their own profile', status: HTTP_STATUS.FORBIDDEN };
-  }
-  if (req.user.role === ROLES.PARENT) {
-    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
-    if (!childIds.includes(studentId)) return { error: 'Parents can only access their linked child profile', status: HTTP_STATUS.FORBIDDEN };
-  }
-  if (req.user.role === ROLES.TEACHER) {
-    const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
-    const student = await Student.findById(studentId).lean();
-    if (!student) return { error: 'Student not found', status: HTTP_STATUS.NOT_FOUND };
-    const canAccess = student.enrollments?.some((e) => classIds.some((id) => id.equals(e.classRoom)));
-    if (!canAccess) return { error: 'Teacher can only access assigned class students', status: HTTP_STATUS.FORBIDDEN };
-  }
-  return null;
-}
-
 exports.getProfile = asyncHandler(async (req, res) => {
-  const accessError = await assertStudentAccess(req, req.params.id);
-  if (accessError) return res.status(accessError.status).json({ message: accessError.error });
+  // Access enforced by requireStudentAccess middleware on the route.
 
   const student = await Student.findById(req.params.id)
     .populate('enrollments.academicYear', 'name isActive status')

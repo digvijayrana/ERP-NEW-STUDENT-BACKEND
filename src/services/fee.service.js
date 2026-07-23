@@ -486,7 +486,8 @@ async function listFeeHistoryPaginated({ filter = {}, search, paymentStatus, ski
           ]
         },
         status: 1,
-        locked: 1
+        locked: 1,
+        createdAt: 1
       }
     },
     { $unwind: { path: '$payments', preserveNullAndEmptyArrays: true } },
@@ -506,6 +507,7 @@ async function listFeeHistoryPaginated({ filter = {}, search, paymentStatus, ski
         paidAmount: { $ifNull: ['$payments.amount', 0] },
         pendingAmount: '$balanceAmount',
         paymentDate: '$payments.paidAt',
+        createdAt: 1,
         paymentStatus: {
           $cond: [
             { $eq: ['$payments.status', 'void'] },
@@ -581,6 +583,7 @@ async function listFeeHistory(filter = {}) {
         paidAmount: payment.amount,
         pendingAmount: invoice.balanceAmount,
         paymentDate: payment.paidAt,
+        createdAt: invoice.createdAt,
         paymentStatus: payment.status === 'void' ? 'void' : invoice.status,
         mode: payment.mode,
         locked: payment.locked
@@ -601,6 +604,7 @@ async function listFeeHistory(filter = {}) {
         paidAmount: 0,
         pendingAmount: invoice.balanceAmount,
         paymentDate: null,
+        createdAt: invoice.createdAt,
         paymentStatus: invoice.status,
         mode: null,
         locked: invoice.locked

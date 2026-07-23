@@ -22,6 +22,7 @@ const { maskTeacherRecord } = require('../utils/dataMasking');
 const { logDocumentAccess } = require('../services/activityLog.service');
 const { issueAccessToken, getAccessTtlSeconds, buildDocumentFileUrl } = require('../services/documentAccess.service');
 const { teacherDocumentTokenMatches } = require('../middleware/documentAccess.middleware');
+const { ensureTeacherOwnDocuments } = require('../middleware/resourceAccess.middleware');
 
 const TEACHER_SORT_FIELDS = ['firstName', 'employeeCode', 'phone', 'baseSalary', 'status', 'createdAt'];
 const log = createLogger('teachers');
@@ -125,9 +126,6 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own staff profile' });
-  }
   const teacher = await Teacher.findById(req.params.id);
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
   res.json(maskTeacherRecord(teacher, req.user, req.permissions));
@@ -350,79 +348,137 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
 });
 
 exports.getDocumentUrl = asyncHandler(async (req, res) => {
-  const teacher = await Teacher.findById(req.params.id);
-  if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
+  try {
+    const teacher = await Teacher.findById(req.params.id);
+    if (!teacher) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found', code: 'NOT_FOUND' });
+    }
 
-  if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
+    try {
+      ensureTeacherOwnDocuments(req);
+    } catch (accessError) {
+      return res.status(accessError.status || HTTP_STATUS.FORBIDDEN).json({
+        message: accessError.message,
+        code: accessError.code || 'FORBIDDEN'
+      });
+    }
+
+    const docType = req.params.docType;
+    const doc = teacher.documents?.[docType];
+    if (!doc?.url) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found', code: 'NOT_FOUND' });
+    }
+
+    const accessToken = issueAccessToken({
+      userId: req.user._id || req.user.id,
+      resourceType: 'teacher',
+      resourceId: teacher._id,
+      documentId: docType
+    });
+    const url = buildDocumentFileUrl(
+      req,
+      `/teachers/${req.params.id}/documents/${docType}/file`,
+      accessToken
+    );
+    return res.json({ url, expiresInSeconds: getAccessTtlSeconds() });
+  } catch (error) {
+    log.error('getDocumentUrl failed', {
+      teacherId: req.params.id,
+      docType: req.params.docType,
+      error: error.message,
+      stack: error.stack
+    });
+    const status = error.status || error.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
+    return res.status(status).json({
+      message: error.message || 'Failed to generate teacher document URL',
+      code: error.code || 'DOCUMENT_URL_ERROR'
+    });
   }
-
-  const docType = req.params.docType;
-  const doc = teacher.documents?.[docType];
-  if (!doc?.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
-
-  const accessToken = issueAccessToken({
-    userId: req.user._id || req.user.id,
-    resourceType: 'teacher',
-    resourceId: teacher._id,
-    documentId: docType
-  });
-  const url = buildDocumentFileUrl(
-    req,
-    `/teachers/${req.params.id}/documents/${docType}/file`,
-    accessToken
-  );
-  res.json({ url, expiresInSeconds: getAccessTtlSeconds() });
 });
 
 exports.streamDocument = asyncHandler(async (req, res) => {
-  const teacher = await Teacher.findById(req.params.id);
-  if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
-
-  const docType = req.params.docType;
-  if (!teacherDocumentTokenMatches(req, teacher._id, docType)) {
-    if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
-    }
-  }
-
-  const doc = teacher.documents?.[docType];
-  if (!doc?.url) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
-
-  logDocumentAccess({
-    module: MODULES.TEACHERS,
-    entityId: teacher._id,
-    entityLabel: teacher.employeeCode,
-    documentType: docType,
-    user: req.user,
-    req
-  });
-
-  const key = extractStorageKey(doc.url, doc.storageKey);
-  if (!key) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document storage key not found' });
-  }
-
   try {
-    const provider = doc.url.startsWith('local://') ? 'local' : 's3';
-    const { body, contentType } = await readDocument(key, provider);
-    const fileName = (doc.originalName || docType).replace(/[^\w.\-() ]/g, '_');
-    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
-    if (body.pipe) {
-      body.pipe(res);
-      return;
+    const teacher = await Teacher.findById(req.params.id);
+    if (!teacher) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found', code: 'NOT_FOUND' });
     }
-    if (Buffer.isBuffer(body)) {
-      return res.send(body);
+
+    const docType = req.params.docType;
+    if (!teacherDocumentTokenMatches(req, teacher._id, docType)) {
+      try {
+        ensureTeacherOwnDocuments(req);
+      } catch (accessError) {
+        return res.status(accessError.status || HTTP_STATUS.FORBIDDEN).json({
+          message: accessError.message,
+          code: accessError.code || 'FORBIDDEN'
+        });
+      }
     }
-    const buffer = Buffer.from(await body.transformToByteArray());
-    return res.send(buffer);
+
+    const doc = teacher.documents?.[docType];
+    if (!doc?.url) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found', code: 'NOT_FOUND' });
+    }
+
+    logDocumentAccess({
+      module: MODULES.TEACHERS,
+      entityId: teacher._id,
+      entityLabel: teacher.employeeCode,
+      documentType: docType,
+      user: req.user,
+      req
+    });
+
+    const key = extractStorageKey(doc.url, doc.storageKey);
+    if (!key) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'Document storage key not found',
+        code: 'MISSING_STORAGE_KEY'
+      });
+    }
+
+    try {
+      const provider = doc.url.startsWith('local://') ? 'local' : 's3';
+      const { body, contentType } = await readDocument(key, provider);
+      const fileName = (doc.originalName || docType).replace(/[^\w.\-() ]/g, '_');
+      const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+      if (body.pipe) {
+        body.pipe(res);
+        return;
+      }
+      if (Buffer.isBuffer(body)) {
+        return res.send(body);
+      }
+      const buffer = Buffer.from(await body.transformToByteArray());
+      return res.send(buffer);
+    } catch (storageError) {
+      log.error('Teacher document stream failed', {
+        teacherId: req.params.id,
+        docType,
+        key,
+        error: storageError.message,
+        stack: storageError.stack
+      });
+      const status = storageError.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
+      return res.status(status).json({
+        message: storageError.message || 'Unable to read teacher document from storage',
+        code: storageError.code || 'STORAGE_ERROR'
+      });
+    }
   } catch (error) {
-    log.error('Teacher document stream failed', { teacherId: req.params.id, docType, key, error: error.message });
-    const status = error.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
-    return res.status(status).json({ message: error.message });
+    log.error('streamDocument failed', {
+      teacherId: req.params.id,
+      docType: req.params.docType,
+      error: error.message,
+      stack: error.stack
+    });
+    const status = error.status || error.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
+    return res.status(status).json({
+      message: error.message || 'Failed to stream teacher document',
+      code: error.code || 'DOCUMENT_STREAM_ERROR'
+    });
   }
 });
 
@@ -430,8 +486,10 @@ exports.streamEntryDocument = asyncHandler(async (req, res) => {
   const teacher = await Teacher.findById(req.params.id);
   if (!teacher) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Teacher not found' });
 
-  if (req.user.role === ROLES.TEACHER && req.user.teacher?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teachers can only access their own documents' });
+  try {
+    ensureTeacherOwnDocuments(req);
+  } catch (error) {
+    return res.status(error.status || HTTP_STATUS.FORBIDDEN).json({ message: error.message });
   }
 
   const section = req.params.section;

@@ -1,5 +1,6 @@
 const Payroll = require('../models/Payroll');
 const Teacher = require('../models/Teacher');
+const TeacherAttendance = require('../models/TeacherAttendance');
 const { HTTP_STATUS } = require('../constants');
 const { periodFromParts } = require('../utils/effectivePeriod');
 const { integrityError, logIntegrityFailure } = require('./integrity.service');
@@ -26,6 +27,76 @@ function resolveTeacherSalary(teacher, year, month) {
     if (match) return match.basicSalary;
   }
   return teacher.baseSalary;
+}
+
+function daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
+/**
+ * Count leave days from teacher attendance for a calendar month.
+ * absent = 1 day, half_day = 0.5 day.
+ */
+async function computeTeacherLeaveSummary(teacher, year, month) {
+  const basicSalary = resolveTeacherSalary(teacher, year, month);
+  const days = daysInMonth(year, month);
+  const perDayRate = days > 0 ? Math.round((Number(basicSalary) || 0) / days) : 0;
+  const allowedLeaves = Math.max(Number(teacher.monthlyAllowedLeaves) || 0, 0);
+
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 1);
+
+  const rows = await TeacherAttendance.find({
+    teacher: teacher._id,
+    date: { $gte: start, $lt: end },
+    status: { $in: ['absent', 'half_day'] }
+  }).lean();
+
+  const leavesTaken = rows.reduce((sum, row) => {
+    if (row.status === 'half_day') return sum + 0.5;
+    if (row.status === 'absent') return sum + 1;
+    return sum;
+  }, 0);
+
+  const excessLeaves = Math.max(0, leavesTaken - allowedLeaves);
+  const leaveDeduction = Math.round(excessLeaves * perDayRate);
+
+  return {
+    allowedLeaves,
+    leavesTaken,
+    excessLeaves,
+    daysInMonth: days,
+    perDayRate,
+    leaveDeduction,
+    basicSalary
+  };
+}
+
+async function previewPayroll(teacherId, month, year) {
+  const teacher = await validateTeacherForPayroll(teacherId);
+  const leaveSummary = await computeTeacherLeaveSummary(teacher, Number(year), Number(month));
+  return {
+    teacher: {
+      _id: teacher._id,
+      firstName: teacher.firstName,
+      lastName: teacher.lastName,
+      employeeCode: teacher.employeeCode,
+      baseSalary: teacher.baseSalary,
+      monthlyAllowedLeaves: teacher.monthlyAllowedLeaves || 0
+    },
+    month: Number(month),
+    year: Number(year),
+    basicSalary: leaveSummary.basicSalary,
+    leaveSummary: {
+      allowedLeaves: leaveSummary.allowedLeaves,
+      leavesTaken: leaveSummary.leavesTaken,
+      excessLeaves: leaveSummary.excessLeaves,
+      daysInMonth: leaveSummary.daysInMonth,
+      perDayRate: leaveSummary.perDayRate,
+      leaveDeduction: leaveSummary.leaveDeduction
+    },
+    suggestedDeductions: leaveSummary.leaveDeduction
+  };
 }
 
 async function applySalaryRevision(teacher, newSalary, effectiveFrom, user) {
@@ -115,9 +186,17 @@ async function createPayroll(payload, user) {
 
   await ensureNoDuplicatePayroll(teacher._id, month, year);
 
+  const leaveSummary = await computeTeacherLeaveSummary(teacher, year, month);
   const basicSalary = payload.basicSalary != null
     ? Math.max(Number(payload.basicSalary) || 0, 0)
-    : resolveTeacherSalary(teacher, year, month);
+    : leaveSummary.basicSalary;
+
+  const otherDeductions = Math.max(
+    Number(payload.otherDeductions != null ? payload.otherDeductions : payload.deductions) || 0,
+    0
+  );
+  const leaveDeduction = leaveSummary.leaveDeduction;
+  const deductions = leaveDeduction + otherDeductions;
 
   const payroll = await Payroll.create({
     teacher: teacher._id,
@@ -125,16 +204,25 @@ async function createPayroll(payload, user) {
     year,
     basicSalary,
     allowances: Math.max(Number(payload.allowances) || 0, 0),
-    deductions: Math.max(Number(payload.deductions) || 0, 0),
+    otherDeductions,
+    deductions,
+    leaveSummary: {
+      allowedLeaves: leaveSummary.allowedLeaves,
+      leavesTaken: leaveSummary.leavesTaken,
+      excessLeaves: leaveSummary.excessLeaves,
+      daysInMonth: leaveSummary.daysInMonth,
+      perDayRate: leaveSummary.perDayRate,
+      leaveDeduction
+    },
     paymentMode: payload.paymentMode || 'bank_transfer',
     status: 'pending',
     remarks: payload.remarks,
-    salaryEffectiveSnapshot: resolveTeacherSalary(teacher, year, month),
+    salaryEffectiveSnapshot: leaveSummary.basicSalary,
     createdBy: user?.id,
     updatedBy: user?.id
   });
 
-  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary');
+  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary monthlyAllowedLeaves');
 }
 
 async function updatePayroll(payrollId, payload, user, audit) {
@@ -150,13 +238,35 @@ async function updatePayroll(payrollId, payload, user, audit) {
 
   if (payload.basicSalary !== undefined) payroll.basicSalary = Math.max(Number(payload.basicSalary) || 0, 0);
   if (payload.allowances !== undefined) payroll.allowances = Math.max(Number(payload.allowances) || 0, 0);
-  if (payload.deductions !== undefined) payroll.deductions = Math.max(Number(payload.deductions) || 0, 0);
+
+  const teacher = await Teacher.findById(payroll.teacher);
+  if (teacher) {
+    const leaveSummary = await computeTeacherLeaveSummary(teacher, payroll.year, payroll.month);
+    const otherDeductions = payload.otherDeductions != null
+      ? Math.max(Number(payload.otherDeductions) || 0, 0)
+      : (payload.deductions != null
+        ? Math.max(Number(payload.deductions) || 0, 0)
+        : Math.max(Number(payroll.otherDeductions) || 0, 0));
+    payroll.otherDeductions = otherDeductions;
+    payroll.leaveSummary = {
+      allowedLeaves: leaveSummary.allowedLeaves,
+      leavesTaken: leaveSummary.leavesTaken,
+      excessLeaves: leaveSummary.excessLeaves,
+      daysInMonth: leaveSummary.daysInMonth,
+      perDayRate: leaveSummary.perDayRate,
+      leaveDeduction: leaveSummary.leaveDeduction
+    };
+    payroll.deductions = leaveSummary.leaveDeduction + otherDeductions;
+  } else if (payload.deductions !== undefined) {
+    payroll.deductions = Math.max(Number(payload.deductions) || 0, 0);
+  }
+
   if (payload.paymentMode !== undefined) payroll.paymentMode = payload.paymentMode;
   if (payload.remarks !== undefined) payroll.remarks = payload.remarks;
   payroll.updatedBy = user?.id;
   await payroll.save();
 
-  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary');
+  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary monthlyAllowedLeaves');
 }
 
 async function markPayrollPaid(payrollId, payload, user, audit) {
@@ -184,7 +294,7 @@ async function markPayrollPaid(payrollId, payload, user, audit) {
   payroll.updatedBy = user?.id;
   await payroll.save();
 
-  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary');
+  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary monthlyAllowedLeaves');
 }
 
 async function removePayroll(payrollId, user, audit) {
@@ -223,12 +333,14 @@ async function unlockPayroll(payrollId, user) {
   payroll.updatedBy = user?.id;
   await payroll.save();
 
-  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary');
+  return payroll.populate('teacher', 'firstName lastName employeeCode baseSalary monthlyAllowedLeaves');
 }
 
 module.exports = {
   PAYROLL_MODULE,
   resolveTeacherSalary,
+  computeTeacherLeaveSummary,
+  previewPayroll,
   applySalaryRevision,
   ensureNoDuplicatePayroll,
   assertPayrollEditable,

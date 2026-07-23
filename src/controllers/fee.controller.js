@@ -20,6 +20,7 @@ const { assertReversalAllowed, logReversal, logUnlock } = require('../services/b
 const { HTTP_STATUS, ROLES, PAGINATION } = require('../constants');
 const { sendPaginated } = require('../utils/apiResponse');
 const { parsePaginationQuery, parseSortQuery } = require('../utils/pagination');
+const { ensureInvoiceAccess, getLinkedChildIds } = require('../middleware/resourceAccess.middleware');
 
 const INVOICE_SORT_FIELDS = ['invoiceNumber', 'dueDate', 'feeYear', 'feeMonth', 'status', 'createdAt'];
 
@@ -45,19 +46,7 @@ async function populateInvoice(id) {
 }
 
 function assertInvoiceAccess(req, invoice) {
-  if (req.user.role === ROLES.STUDENT && invoice.student._id?.toString() !== req.user.student?.toString()) {
-    const error = new Error('Students can access only their own fee records');
-    error.status = HTTP_STATUS.FORBIDDEN;
-    throw error;
-  }
-  if (req.user.role === ROLES.PARENT) {
-    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
-    if (!childIds.includes(invoice.student._id.toString())) {
-      const error = new Error('Parents can access only their linked child fee records');
-      error.status = HTTP_STATUS.FORBIDDEN;
-      throw error;
-    }
-  }
+  ensureInvoiceAccess(req, invoice);
 }
 
 exports.generateDemands = asyncHandler(async (req, res) => {
@@ -120,7 +109,7 @@ exports.listInvoices = asyncHandler(async (req, res) => {
 
   if (req.user.role === ROLES.STUDENT) filter.student = req.user.student;
   if (req.user.role === ROLES.PARENT) {
-    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const childIds = getLinkedChildIds(req.user);
     const selectedChild = req.query.student && childIds.map(String).includes(String(req.query.student)) ? req.query.student : null;
     filter.student = selectedChild || { $in: childIds };
   }
@@ -295,7 +284,7 @@ exports.feeHistory = asyncHandler(async (req, res) => {
 
   if (req.user.role === ROLES.STUDENT) filter.student = req.user.student;
   if (req.user.role === ROLES.PARENT) {
-    const childIds = req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : []);
+    const childIds = getLinkedChildIds(req.user);
     filter.student = req.query.student && childIds.map(String).includes(String(req.query.student))
       ? req.query.student
       : { $in: childIds };

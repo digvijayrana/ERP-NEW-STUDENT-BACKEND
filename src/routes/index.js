@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware');
 
 router.use(require('./health.routes'));
 router.use('/public', require('./public.routes'));

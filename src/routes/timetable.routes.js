@@ -1,9 +1,9 @@
 const router = require('express').Router();
 const controller = require('../controllers/timetable.controller');
-const { authorize } = require('../middleware/auth');
+const { roles } = require('../middleware');
 
-router.get('/', authorize('admin', 'teacher', 'student', 'parent'), controller.list);
-router.post('/', authorize('admin'), controller.upsert);
-router.delete('/:id/periods/:periodId', authorize('admin'), controller.deletePeriod);
+router.get('/', roles.schoolUsers, controller.list);
+router.post('/', roles.admin, controller.upsert);
+router.delete('/:id/periods/:periodId', roles.admin, controller.deletePeriod);
 
 module.exports = router;

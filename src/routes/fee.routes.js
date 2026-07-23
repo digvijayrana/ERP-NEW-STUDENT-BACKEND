@@ -1,27 +1,26 @@
 const router = require('express').Router();
 const controller = require('../controllers/fee.controller');
 const structureController = require('../controllers/feeStructure.controller');
-const { requirePermission } = require('../middleware/auth');
+const { fees } = require('../middleware');
 
-// Fee structure definition (admission / registration / tuition / bus / lab / custom components)
-router.get('/structures', requirePermission('fees', 'view'), structureController.list);
-router.get('/structures/for-class', requirePermission('fees', 'view'), structureController.getForClass);
-router.put('/structures', requirePermission('fees', 'create'), structureController.upsert);
-router.delete('/structures/:id', requirePermission('fees', 'create'), structureController.remove);
+router.get('/structures', fees.view, structureController.list);
+router.get('/structures/for-class', fees.view, structureController.getForClass);
+router.put('/structures', fees.create, structureController.upsert);
+router.delete('/structures/:id', fees.create, structureController.remove);
 
-router.post('/demands/generate', requirePermission('fees', 'create'), controller.generateDemands);
-router.post('/invoices', requirePermission('fees', 'create'), controller.createInvoice);
-router.post('/invoices/bulk-monthly', requirePermission('fees', 'create'), controller.createBulkMonthlyInvoices);
-router.get('/summary', requirePermission('fees', 'view'), controller.summary);
-router.get('/invoices/preview', requirePermission('fees', 'view'), controller.previewDemand);
-router.get('/invoices', requirePermission('fees', 'view'), controller.listInvoices);
-router.get('/invoices/:id', requirePermission('fees', 'view'), controller.getInvoice);
-router.patch('/invoices/:id', requirePermission('fees', 'edit'), controller.updateInvoice);
-router.post('/invoices/:id/payments', requirePermission('fees', 'edit'), controller.addPayment);
-router.post('/invoices/:id/payments/:paymentId/void', requirePermission('fees', 'edit'), controller.voidPayment);
-router.post('/invoices/:id/payments/:paymentId/unlock', requirePermission('fees', 'unlock'), controller.unlockPayment);
-router.get('/history', requirePermission('fees', 'view'), controller.feeHistory);
-router.get('/invoices/:id/pdf', requirePermission('fees', 'view'), controller.downloadInvoice);
-router.get('/invoices/:id/receipts/:paymentId/pdf', requirePermission('fees', 'view'), controller.downloadReceipt);
+router.post('/demands/generate', fees.create, controller.generateDemands);
+router.post('/invoices', fees.create, controller.createInvoice);
+router.post('/invoices/bulk-monthly', fees.create, controller.createBulkMonthlyInvoices);
+router.get('/summary', fees.view, controller.summary);
+router.get('/invoices/preview', fees.view, controller.previewDemand);
+router.get('/invoices', fees.view, controller.listInvoices);
+router.get('/invoices/:id', fees.view, controller.getInvoice);
+router.patch('/invoices/:id', fees.edit, controller.updateInvoice);
+router.post('/invoices/:id/payments', fees.edit, controller.addPayment);
+router.post('/invoices/:id/payments/:paymentId/void', fees.edit, controller.voidPayment);
+router.post('/invoices/:id/payments/:paymentId/unlock', fees.unlock, controller.unlockPayment);
+router.get('/history', fees.view, controller.feeHistory);
+router.get('/invoices/:id/pdf', fees.view, controller.downloadInvoice);
+router.get('/invoices/:id/receipts/:paymentId/pdf', fees.view, controller.downloadReceipt);
 
 module.exports = router;

@@ -1,10 +1,10 @@
 const router = require('express').Router();
 const controller = require('../controllers/feePrediction.controller');
-const { requirePermission } = require('../middleware/auth');
+const { fee_prediction: fp } = require('../middleware');
 
-router.get('/dashboard', requirePermission('fee_prediction', 'view'), controller.dashboard);
-router.get('/predictions', requirePermission('fee_prediction', 'view'), controller.predictions);
-router.post('/reminders/prepare', requirePermission('fee_prediction', 'create'), controller.prepareReminders);
-router.post('/reminders/send', requirePermission('fee_prediction', 'create'), controller.sendReminders);
+router.get('/dashboard', fp.view, controller.dashboard);
+router.get('/predictions', fp.view, controller.predictions);
+router.post('/reminders/prepare', fp.create, controller.prepareReminders);
+router.post('/reminders/send', fp.create, controller.sendReminders);
 
 module.exports = router;

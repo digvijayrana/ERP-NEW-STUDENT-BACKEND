@@ -1,8 +1,8 @@
 const router = require('express').Router();
 const activityController = require('../controllers/activity.controller');
-const { requirePermission } = require('../middleware/auth');
+const { governance } = require('../middleware');
 
-router.get('/', requirePermission('governance', 'view'), activityController.list);
-router.get('/:id', requirePermission('governance', 'view'), activityController.get);
+router.get('/', governance.view, activityController.list);
+router.get('/:id', governance.view, activityController.get);
 
 module.exports = router;

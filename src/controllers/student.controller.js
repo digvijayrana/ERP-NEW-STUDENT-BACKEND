@@ -391,24 +391,11 @@ exports.searchParents = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  if (req.user.role === ROLES.STUDENT && req.user.student?.toString() !== req.params.id) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Students can only access their own profile' });
-  }
-  if (req.user.role === ROLES.PARENT) {
-    const childIds = (req.user.linkedStudents?.length ? req.user.linkedStudents : (req.user.linkedStudent ? [req.user.linkedStudent] : [])).map(String);
-    if (!childIds.includes(req.params.id)) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Parents can only access their linked child profile' });
-  }
-
   const student = await Student.findById(req.params.id)
     .populate('enrollments.academicYear', 'name')
     .populate('enrollments.classRoom', 'name section classTeacher')
     .populate('enrollments.classRoom.classTeacher', 'firstName lastName');
   if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
-  if (req.user.role === ROLES.TEACHER) {
-    const classIds = await ClassRoom.find({ classTeacher: req.user.teacher }).distinct('_id');
-    const canAccess = student.enrollments.some((enrollment) => classIds.some((id) => id.equals(enrollment.classRoom?._id || enrollment.classRoom)));
-    if (!canAccess) return res.status(HTTP_STATUS.FORBIDDEN).json({ message: 'Teacher can only access assigned class students' });
-  }
   res.json(maskStudentRecord(student, req.user, req.permissions));
 });
 
@@ -595,84 +582,141 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
 });
 
 exports.getDocumentUrl = asyncHandler(async (req, res) => {
-  const student = await Student.findById(req.params.id);
-  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Student not found',
+        code: 'NOT_FOUND'
+      });
+    }
 
-  await ensureStudentDocumentAccess(req, student);
+    await ensureStudentDocumentAccess(req, student);
 
-  const doc = student.documents.id(req.params.documentId);
-  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
+    const doc = student.documents.id(req.params.documentId);
+    if (!doc) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Document not found',
+        code: 'NOT_FOUND'
+      });
+    }
 
-  const accessToken = issueAccessToken({
-    userId: req.user._id || req.user.id,
-    resourceType: 'student',
-    resourceId: student._id,
-    documentId: doc._id
-  });
-  const url = buildDocumentFileUrl(
-    req,
-    `/students/${req.params.id}/documents/${req.params.documentId}/file`,
-    accessToken
-  );
-  res.json({
-    url,
-    fileName: doc.title,
-    mimeType: doc.mimeType,
-    expiresInSeconds: getAccessTtlSeconds()
-  });
+    const accessToken = issueAccessToken({
+      userId: req.user._id || req.user.id,
+      resourceType: 'student',
+      resourceId: student._id,
+      documentId: doc._id
+    });
+    const url = buildDocumentFileUrl(
+      req,
+      `/students/${req.params.id}/documents/${req.params.documentId}/file`,
+      accessToken
+    );
+    return res.json({
+      url,
+      fileName: doc.title,
+      mimeType: doc.mimeType,
+      expiresInSeconds: getAccessTtlSeconds()
+    });
+  } catch (error) {
+    log.error('getDocumentUrl failed', {
+      studentId: req.params.id,
+      documentId: req.params.documentId,
+      userId: req.user?._id,
+      error: error.message,
+      stack: error.stack
+    });
+    const status = error.status || error.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
+    return res.status(status).json({
+      message: error.message || 'Failed to generate student document URL',
+      code: error.code || 'DOCUMENT_URL_ERROR'
+    });
+  }
 });
 
 exports.streamDocument = asyncHandler(async (req, res) => {
-  const student = await Student.findById(req.params.id);
-  if (!student) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Student not found' });
-
-  if (!studentDocumentTokenMatches(req, student._id, req.params.documentId)) {
-    await ensureStudentDocumentAccess(req, student);
-  }
-
-  const doc = student.documents.id(req.params.documentId);
-  if (!doc) return res.status(HTTP_STATUS.NOT_FOUND).json({ message: 'Document not found' });
-
-  logDocumentAccess({
-    module: MODULES.STUDENTS,
-    entityId: student._id,
-    entityLabel: student.admissionNumber,
-    documentType: doc.type,
-    user: req.user,
-    req,
-    meta: { documentId: doc._id, title: doc.title }
-  });
-
-  const key = extractStorageKey(doc.fileUrl, doc.storageKey);
-  if (!key) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Document storage key not found' });
-  }
-
   try {
-    const { body, contentType } = await readDocument(key, doc.storageProvider);
-    const fileName = (doc.title || 'document').replace(/[^\w.\-() ]/g, '_');
-    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
-    if (body.pipe) {
-      body.pipe(res);
-      return;
+    const student = await Student.findById(req.params.id);
+    if (!student) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Student not found',
+        code: 'NOT_FOUND'
+      });
     }
-    if (Buffer.isBuffer(body)) {
-      return res.send(body);
+
+    if (!studentDocumentTokenMatches(req, student._id, req.params.documentId)) {
+      await ensureStudentDocumentAccess(req, student);
     }
-    const buffer = Buffer.from(await body.transformToByteArray());
-    return res.send(buffer);
+
+    const doc = student.documents.id(req.params.documentId);
+    if (!doc) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        message: 'Document not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    logDocumentAccess({
+      module: MODULES.STUDENTS,
+      entityId: student._id,
+      entityLabel: student.admissionNumber,
+      documentType: doc.type,
+      user: req.user,
+      req,
+      meta: { documentId: doc._id, title: doc.title }
+    });
+
+    const key = extractStorageKey(doc.fileUrl, doc.storageKey);
+    if (!key) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'Document storage key not found',
+        code: 'MISSING_STORAGE_KEY'
+      });
+    }
+
+    try {
+      const { body, contentType } = await readDocument(key, doc.storageProvider);
+      const fileName = (doc.title || 'document').replace(/[^\w.\-() ]/g, '_');
+      const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+      if (body.pipe) {
+        body.pipe(res);
+        return;
+      }
+      if (Buffer.isBuffer(body)) {
+        return res.send(body);
+      }
+      const buffer = Buffer.from(await body.transformToByteArray());
+      return res.send(buffer);
+    } catch (storageError) {
+      log.error('Document stream failed', {
+        studentId: req.params.id,
+        documentId: req.params.documentId,
+        key,
+        provider: doc.storageProvider,
+        error: storageError.message,
+        cause: storageError.cause?.message,
+        stack: storageError.stack
+      });
+      const status = storageError.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
+      return res.status(status).json({
+        message: storageError.message || 'Unable to read document from storage',
+        code: storageError.code || 'STORAGE_ERROR'
+      });
+    }
   } catch (error) {
-    log.error('Document stream failed', {
+    log.error('streamDocument failed', {
       studentId: req.params.id,
       documentId: req.params.documentId,
-      key,
-      provider: doc.storageProvider,
+      userId: req.user?._id,
       error: error.message,
-      cause: error.cause?.message
+      stack: error.stack
     });
-    const status = error.code === 'NotFound' ? HTTP_STATUS.NOT_FOUND : 502;
-    return res.status(status).json({ message: error.message });
+    const status = error.status || error.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
+    return res.status(status).json({
+      message: error.message || 'Failed to stream student document',
+      code: error.code || 'DOCUMENT_STREAM_ERROR'
+    });
   }
 });

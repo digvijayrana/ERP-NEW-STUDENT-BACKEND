@@ -10,6 +10,16 @@ const payrollSchema = new mongoose.Schema(
     basicSalary: { type: Number, required: true, min: 0 },
     allowances: { type: Number, default: 0, min: 0 },
     deductions: { type: Number, default: 0, min: 0 },
+    /** Manual/other deductions excluding auto leave deduction. */
+    otherDeductions: { type: Number, default: 0, min: 0 },
+    leaveSummary: {
+      allowedLeaves: { type: Number, default: 0, min: 0 },
+      leavesTaken: { type: Number, default: 0, min: 0 },
+      excessLeaves: { type: Number, default: 0, min: 0 },
+      daysInMonth: { type: Number, default: 0, min: 0 },
+      perDayRate: { type: Number, default: 0, min: 0 },
+      leaveDeduction: { type: Number, default: 0, min: 0 }
+    },
     salaryEffectiveSnapshot: { type: Number, min: 0 },
     paidAt: Date,
     paymentMode: { type: String, enum: ['cash', 'bank_transfer', 'upi', 'cheque'], default: 'bank_transfer' },
