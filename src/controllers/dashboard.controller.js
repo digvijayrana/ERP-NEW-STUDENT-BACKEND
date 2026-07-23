@@ -41,6 +41,21 @@ function startOfToday() {
   return date;
 }
 
+async function countByGender(Model, filter = {}) {
+  const rows = await Model.aggregate([
+    { $match: filter },
+    { $group: { _id: '$gender', count: { $sum: 1 } } }
+  ]);
+  const result = { male: 0, female: 0, other: 0 };
+  for (const row of rows) {
+    const count = row.count || 0;
+    if (row._id === 'male') result.male = count;
+    else if (row._id === 'female') result.female = count;
+    else if (row._id) result.other += count;
+  }
+  return result;
+}
+
 function endOfToday() {
   const date = new Date();
   date.setHours(23, 59, 59, 999);
@@ -280,6 +295,10 @@ async function buildAdminDashboard(activeYear, user) {
     activeStudents,
     totalTeachers,
     activeTeachers,
+    totalStudentGender,
+    activeStudentGender,
+    totalTeacherGender,
+    activeTeacherGender,
     totalSections,
     distinctClassNames,
     todaysAdmissions,
@@ -292,6 +311,10 @@ async function buildAdminDashboard(activeYear, user) {
     Student.countDocuments({ status: 'active' }),
     Teacher.countDocuments({}),
     Teacher.countDocuments({ status: 'active' }),
+    countByGender(Student, {}),
+    countByGender(Student, { status: 'active' }),
+    countByGender(Teacher, {}),
+    countByGender(Teacher, { status: 'active' }),
     ClassRoom.countDocuments(classFilter),
     ClassRoom.distinct('name', classFilter),
     Student.countDocuments({ admissionDate: { $gte: todayStart, $lte: todayEnd } }),
@@ -307,6 +330,14 @@ async function buildAdminDashboard(activeYear, user) {
     activeStudents,
     totalTeachers,
     activeTeachers,
+    studentGender: {
+      total: totalStudentGender,
+      active: activeStudentGender
+    },
+    teacherGender: {
+      total: totalTeacherGender,
+      active: activeTeacherGender
+    },
     totalClasses: distinctClassNames.length,
     totalSections,
     todaysAdmissions,

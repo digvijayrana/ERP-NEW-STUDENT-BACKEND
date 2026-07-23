@@ -13,6 +13,7 @@ const {
 } = require('../services/activityLog.service');
 const {
   countStudentsInClass,
+  countStudentsByGenderInClasses,
   ensureAcademicYearEditable,
   ensureUniqueClassCombination,
   ensureClassCapacityNotBelowEnrollment,
@@ -94,14 +95,22 @@ async function ensureClassTeacherIsAvailable(classTeacher, classId) {
   }
 }
 
-async function enrichClass(classRoom) {
+async function enrichClass(classRoom, genderCounts) {
   const obj = classRoom.toObject ? classRoom.toObject() : { ...classRoom };
   const academicYearId = obj.academicYear?._id || obj.academicYear;
-  const studentCount = academicYearId ? await countStudentsInClass(obj._id, academicYearId) : 0;
+  let gender = genderCounts?.get(String(obj._id));
+  if (!gender && academicYearId) {
+    const map = await countStudentsByGenderInClasses([obj._id], academicYearId);
+    gender = map.get(String(obj._id)) || { male: 0, female: 0, other: 0, total: 0 };
+  }
+  gender = gender || { male: 0, female: 0, other: 0, total: 0 };
+  const studentCount = gender.total;
   const capacity = obj.capacity || 0;
   return {
     ...obj,
     studentCount,
+    maleCount: gender.male || 0,
+    femaleCount: gender.female || 0,
     availableCapacity: Math.max(capacity - studentCount, 0)
   };
 }
@@ -178,7 +187,23 @@ exports.list = asyncHandler(async (req, res) => {
     ClassRoom.countDocuments(filter)
   ]);
 
-  const enriched = await Promise.all(classes.map((room) => enrichClass(room)));
+  // Batch gender counts per academic year to avoid N+1 queries
+  const byYear = new Map();
+  for (const room of classes) {
+    const yearId = String(room.academicYear?._id || room.academicYear || '');
+    if (!yearId) continue;
+    if (!byYear.has(yearId)) byYear.set(yearId, []);
+    byYear.get(yearId).push(room._id);
+  }
+  const genderMaps = new Map();
+  await Promise.all([...byYear.entries()].map(async ([yearId, classIds]) => {
+    genderMaps.set(yearId, await countStudentsByGenderInClasses(classIds, yearId));
+  }));
+
+  const enriched = await Promise.all(classes.map((room) => {
+    const yearId = String(room.academicYear?._id || room.academicYear || '');
+    return enrichClass(room, genderMaps.get(yearId));
+  }));
   return sendPaginated(res, enriched, { page, pageSize, totalItems });
 });
 

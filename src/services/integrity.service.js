@@ -8,6 +8,7 @@ const Attendance = require('../models/Attendance');
 const TeacherAttendance = require('../models/TeacherAttendance');
 const User = require('../models/User');
 const Exam = require('../models/Exam');
+const mongoose = require('mongoose');
 const { HTTP_STATUS } = require('../constants');
 const { recordActivity } = require('./activityLog.service');
 const { ACTIONS } = require('../constants/activityActions');
@@ -61,6 +62,64 @@ async function countStudentsInClass(classId, academicYearId) {
       }
     }
   });
+}
+
+/** Count active studying students by gender for one or more classes. */
+async function countStudentsByGenderInClasses(classIds, academicYearId) {
+  const ids = (classIds || [])
+    .filter(Boolean)
+    .map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(String(id)) : id));
+  const empty = () => ({ male: 0, female: 0, other: 0, total: 0 });
+  if (!ids.length || !academicYearId) {
+    return new Map();
+  }
+
+  const yearId = mongoose.Types.ObjectId.isValid(academicYearId)
+    ? new mongoose.Types.ObjectId(String(academicYearId))
+    : academicYearId;
+
+  const rows = await Student.aggregate([
+    {
+      $match: {
+        status: 'active',
+        enrollments: {
+          $elemMatch: {
+            classRoom: { $in: ids },
+            academicYear: yearId,
+            status: 'studying'
+          }
+        }
+      }
+    },
+    { $unwind: '$enrollments' },
+    {
+      $match: {
+        'enrollments.status': 'studying',
+        'enrollments.academicYear': yearId,
+        'enrollments.classRoom': { $in: ids }
+      }
+    },
+    {
+      $group: {
+        _id: { classRoom: '$enrollments.classRoom', gender: '$gender' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  const map = new Map();
+  for (const row of rows) {
+    const key = String(row._id.classRoom);
+    if (!map.has(key)) map.set(key, empty());
+    const entry = map.get(key);
+    const gender = row._id.gender;
+    const count = row.count || 0;
+    if (gender === 'male') entry.male += count;
+    else if (gender === 'female') entry.female += count;
+    else entry.other += count;
+    entry.total += count;
+  }
+  return map;
 }
 
 async function ensureAcademicYearEditable(academicYearId) {
@@ -241,6 +300,7 @@ module.exports = {
   logIntegrityFailure,
   throwWithAudit,
   countStudentsInClass,
+  countStudentsByGenderInClasses,
   ensureAcademicYearEditable,
   ensureUniqueClassCombination,
   ensureClassCapacityNotBelowEnrollment,

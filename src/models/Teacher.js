@@ -39,6 +39,7 @@ const teacherSchema = new mongoose.Schema(
     baseSalary: { type: Number, required: true, min: 0 },
     /** Paid leave days allowed per month before salary deduction. */
     monthlyAllowedLeaves: { type: Number, default: 0, min: 0 },
+    gender: { type: String, enum: ['male', 'female', 'other'], default: 'male' },
     salaryHistory: [salaryHistorySchema],
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     address: {
