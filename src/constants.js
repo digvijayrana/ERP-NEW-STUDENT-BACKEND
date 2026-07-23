@@ -4,7 +4,7 @@ module.exports = {
     HOST: '0.0.0.0',
     JWT_SECRET_FALLBACK: 'change-this-secret',
     JWT_EXPIRES_IN: '30m',
-    MONGODB_URI: 'mongodb://127.0.0.1:27017/school_xyz_db',
+    MONGODB_URI: 'mongodb://127.0.0.1:27017/student_erp',
     CLIENT_URL: 'http://localhost:4200',
     DEV_CLIENT_URL: 'http://localhost:3000',
     NODE_ENV: 'development',
@@ -22,6 +22,7 @@ module.exports = {
     UNAUTHORIZED: 401,
     FORBIDDEN: 403,
     NOT_FOUND: 404,
+    METHOD_NOT_ALLOWED: 405,
     INTERNAL_SERVER_ERROR: 500
   },
 

@@ -51,7 +51,9 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.preview = asyncHandler(async (req, res) => {
-  const { teacher, month, year } = req.query;
+  const teacher = req.body?.teacher || req.query.teacher;
+  const month = req.body?.month || req.query.month;
+  const year = req.body?.year || req.query.year;
   if (!teacher || !month || !year) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({
       message: 'teacher, month and year are required',
